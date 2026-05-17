@@ -1,0 +1,30 @@
+{
+  "name": "gis-world",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc && vite build",
+    "test": "vitest run",
+    "preview": "vite preview --host 0.0.0.0",
+    "download:data": "node scripts/download-data.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.0.0",
+    "fflate": "^0.8.2",
+    "geotiff": "^3.0.5",
+    "lodash": "^4.18.1",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.8.0",
+    "vite": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/lodash": "^4.17.24",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "vitest": "^4.1.6"
+  }
+}

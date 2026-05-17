@@ -1,0 +1,40 @@
+import type { Account, Agent, AgentFamily, ConsumerAgent, Coord, LogisticsAgent, Resource } from "./types";
+
+export const GRID_WIDTH = 24;
+export const GRID_HEIGHT = 16;
+export const MONEY_ACCOUNT: Account = "";
+
+export const POPULATION_CELLS: Array<Coord & { amount: number }> = [
+  { x: 5, y: 5, amount: 6 },
+  { x: 9, y: 13, amount: 5 },
+  { x: 17, y: 4, amount: 7 },
+  { x: 21, y: 9, amount: 4 },
+];
+
+export function consumerAgentFor(x: number, y: number): ConsumerAgent {
+  return `Consumer-${x},${y}`;
+}
+
+export const CONSUMER_AGENTS: ConsumerAgent[] = POPULATION_CELLS.map((cell) => consumerAgentFor(cell.x, cell.y));
+export const LOGISTICS_AGENTS: LogisticsAgent[] = ["Logistics-0", "Logistics-1"];
+
+export const AGENTS: Agent[] = ["Common", "Producer", ...CONSUMER_AGENTS, ...LOGISTICS_AGENTS];
+export const RESOURCES: Resource[] = ["money", "widget", "factory", "population", "road", "congestion", "last-congestion"];
+
+export const AGENT_COLORS: Record<AgentFamily, string> = {
+  Common: "#94a3b8",
+  Producer: "#f59e0b",
+  Consumer: "#38bdf8",
+  Logistics: "#a78bfa",
+};
+
+export function agentFamily(agent: Agent): AgentFamily {
+  if (agent === "Common") return "Common";
+  if (agent.startsWith("Consumer-")) return "Consumer";
+  if (agent.startsWith("Logistics-")) return "Logistics";
+  return "Producer";
+}
+
+export function agentColor(agent: Agent) {
+  return AGENT_COLORS[agentFamily(agent)];
+}
