@@ -63,6 +63,7 @@ function observedWidgetPrice(trades: Trade[], account: Account) {
   let quantity = 0;
   let value = 0;
   for (const trade of trades) {
+    if ((trade.resource ?? "widget") !== "widget") continue;
     if (!sameCellTrade(account, trade)) continue;
     quantity += trade.quantity;
     value += trade.quantity * trade.price;
@@ -73,6 +74,7 @@ function observedWidgetPrice(trades: Trade[], account: Account) {
 function maxObservedMapPrice(trades: Trade[]) {
   let maxPrice: number | null = null;
   for (const trade of trades) {
+    if ((trade.resource ?? "widget") !== "widget") continue;
     maxPrice = Math.max(maxPrice ?? trade.price, trade.price);
   }
   return maxPrice;
@@ -116,6 +118,7 @@ export class OptimisticLocalSaleValueModel {
     let value = 0;
     let logisticsSaleQuantity = 0;
     for (const trade of trades) {
+      if ((trade.resource ?? "widget") !== "widget") continue;
       if (!sameCellTrade(this.account, trade)) continue;
       quantity += trade.quantity;
       value += checkedMul(trade.quantity, trade.price, "local trade value");

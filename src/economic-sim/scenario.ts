@@ -1,9 +1,11 @@
 import { GRID_HEIGHT, GRID_WIDTH, LOGISTICS_AGENTS, MONEY_ACCOUNT, POPULATION_CELLS, consumerAgentFor } from "./constants";
 import { accountOf, addBalance, makeLedger } from "./ledger";
+import { PowerGridInfrastructure, syncPowerGridInfrastructureToLedger } from "./powerGridInfrastructure";
 import type { Coord, SimState } from "./types";
 
 export function createInitialState(): SimState {
   const ledger = makeLedger();
+  const powerGridInfrastructure = new PowerGridInfrastructure();
   const factories: Coord[] = [
     { x: 3, y: 3 },
     { x: 6, y: 11 },
@@ -27,10 +29,14 @@ export function createInitialState(): SimState {
   for (let x = 1; x < GRID_WIDTH - 1; x += 1) {
     addBalance(ledger, "Common", accountOf(x, 5), "road", x % 3 === 0 ? 3 : 2);
     addBalance(ledger, "Common", accountOf(x, 10), "road", x % 4 === 0 ? 3 : 1);
+    powerGridInfrastructure.set({ x, y: 5 }, 1);
+    powerGridInfrastructure.set({ x, y: 10 }, 1);
   }
   for (let y = 2; y < GRID_HEIGHT - 1; y += 1) {
     addBalance(ledger, "Common", accountOf(5, y), "road", 2);
     addBalance(ledger, "Common", accountOf(17, y), "road", y % 3 === 0 ? 3 : 1);
+    powerGridInfrastructure.set({ x: 5, y }, 1);
+    powerGridInfrastructure.set({ x: 17, y }, 1);
   }
   for (const hub of [
     { x: 9, y: 13 },
@@ -39,12 +45,16 @@ export function createInitialState(): SimState {
     { x: 21, y: 9 },
   ]) {
     addBalance(ledger, "Common", accountOf(hub.x, hub.y), "road", 3);
+    powerGridInfrastructure.set(hub, 2);
   }
+  powerGridInfrastructure.update();
+  syncPowerGridInfrastructureToLedger(ledger, powerGridInfrastructure);
 
   return {
     turn: 0,
     nextOrderId: 1,
     ledger,
+    powerGridInfrastructure,
     orders: [],
     lastOrderResults: [],
     trades: [],

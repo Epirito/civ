@@ -18,7 +18,14 @@ export type DrawSimOptions = {
 function cellMetrics(state: SimState) {
   const metrics = new Map<
     Account,
-    { logisticsWidgets: number; factories: number; population: number; road: number; lastCongestion: number }
+    {
+      logisticsWidgets: number;
+      factories: number;
+      population: number;
+      road: number;
+      powerGridInfrastructure: number;
+      lastCongestion: number;
+    }
   >();
   const ensure = (account: Account) => {
     const current = metrics.get(account) ?? {
@@ -26,6 +33,7 @@ function cellMetrics(state: SimState) {
       factories: 0,
       population: 0,
       road: 0,
+      powerGridInfrastructure: 0,
       lastCongestion: 0,
     };
     metrics.set(account, current);
@@ -42,6 +50,7 @@ function cellMetrics(state: SimState) {
       metric.population += resources.population ?? 0;
       if (agent === "Common") {
         metric.road += resources.road ?? 0;
+        metric.powerGridInfrastructure += resources["power-grid-infrastructure"] ?? 0;
         metric.lastCongestion += resources["last-congestion"] ?? 0;
       }
     }
@@ -105,6 +114,7 @@ export function drawSim(canvas: HTMLCanvasElement, state: SimState, hover: Coord
       const population = metric?.population ?? 0;
       const factories = metric?.factories ?? 0;
       const road = metric?.road ?? 0;
+      const powerGridInfrastructure = metric?.powerGridInfrastructure ?? 0;
       const lastCongestion = metric?.lastCongestion ?? 0;
       context.fillStyle = "#18312d";
       context.fillRect(px, py, cellSize - 1, cellSize - 1);
@@ -131,6 +141,16 @@ export function drawSim(canvas: HTMLCanvasElement, state: SimState, hover: Coord
           context.fillStyle = `rgba(248, 113, 113, ${Math.min(0.44, 0.1 + lastCongestion * 0.04)})`;
           context.fillRect(px, py, cellSize - 1, cellSize - 1);
         }
+      }
+      if (powerGridInfrastructure > 0) {
+        context.strokeStyle = `rgba(56, 189, 248, ${Math.min(0.82, 0.34 + powerGridInfrastructure * 0.12)})`;
+        context.lineWidth = Math.max(1, Math.min(3, powerGridInfrastructure));
+        context.beginPath();
+        context.moveTo(px + cellSize * 0.18, py + cellSize * 0.5);
+        context.lineTo(px + cellSize * 0.82, py + cellSize * 0.5);
+        context.moveTo(px + cellSize * 0.5, py + cellSize * 0.18);
+        context.lineTo(px + cellSize * 0.5, py + cellSize * 0.82);
+        context.stroke();
       }
       if (valueHeatmap) {
         const intensity = heatmapIntensity(valueHeatmap, account);

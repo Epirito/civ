@@ -19,6 +19,17 @@ function consumerPolicy(agent: ConsumerAgent): AgentPolicy {
         : 14;
         const quantity = Math.min(population.amount, Math.floor(budget / price));
         api.placeBid(population.account, "widget", price, quantity);
+
+        const lastPowerBid = api.lastOrderResults.find(
+          (result) => result.side === "bid" && result.resource === "electricity" && result.account === population.account,
+        );
+        const powerPrice = lastPowerBid
+          ? lastPowerBid.unfilled > 0
+            ? lastPowerBid.price + 1
+            : Math.max(lastPowerBid.price - 1, 1)
+          : 6;
+        const powerQuantity = Math.min(population.amount, Math.floor(api.balance(MONEY_ACCOUNT, "money") / powerPrice));
+        api.placeBid(population.account, "electricity", powerPrice, powerQuantity);
       }
     },
   };
@@ -52,6 +63,8 @@ export const AGENT_POLICIES: AgentPolicy[] = [
       for (const factory of api.cellsWith("factory")) {
         const available = api.balance(factory.account, "widget");
         api.placeAsk(factory.account, "widget", 8, available);
+        const electricity = api.balance(factory.account, "electricity");
+        api.placeAsk(factory.account, "electricity", 3, electricity);
       }
     },
   },

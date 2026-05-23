@@ -14,6 +14,7 @@ import {
   reserveBalance,
   setBalance,
 } from "./ledger";
+import { PowerGridInfrastructure, syncPowerGridInfrastructureToLedger } from "./powerGridInfrastructure";
 import type { Account, Agent, AgentApi, Ledger, Order, OrderResult, SimState, Trade, Transport } from "./types";
 
 type TransportQuote = {
@@ -56,20 +57,28 @@ function placeOrder(
   return checkedAdd(nextOrderId, 1, "next order id");
 }
 
-export function clearMarket(ledger: Ledger, orders: Order[]) {
+function orderAuctionKey(order: Order, powerGridInfrastructure?: PowerGridInfrastructure) {
+  if (order.resource === "electricity") {
+    const gridId = powerGridInfrastructure?.gridIdAt(order.account);
+    return gridId === undefined || gridId === null ? null : `electricity-grid-${gridId}`;
+  }
+  return `${order.resource}-${order.account}`;
+}
+
+export function clearMarket(ledger: Ledger, orders: Order[], powerGridInfrastructure?: PowerGridInfrastructure) {
   const trades: Trade[] = [];
-  const grouped = new Map<Account, { bids: Order[]; asks: Order[] }>();
+  const grouped = new Map<string, { bids: Order[]; asks: Order[] }>();
 
   for (const order of orders) {
-    const group = grouped.get(order.account) ?? { bids: [], asks: [] };
+    const key = orderAuctionKey(order, powerGridInfrastructure);
+    if (!key) continue;
+    const group = grouped.get(key) ?? { bids: [], asks: [] };
     if (order.side === "bid") group.bids.push(order);
     else group.asks.push(order);
-    grouped.set(order.account, group);
+    grouped.set(key, group);
   }
 
-  for (const [account, group] of grouped) {
-    const coord = parseAccount(account);
-    if (!coord) continue;
+  for (const group of grouped.values()) {
     const bids = sortByValueAsc(group.bids, (order) => -order.price, (order) => order.id);
     const asks = sortByValueAsc(group.asks, (order) => order.price, (order) => order.id);
     let bidIndex = 0;
@@ -84,14 +93,16 @@ export function clearMarket(ledger: Ledger, orders: Order[]) {
       const payment = checkedMul(quantity, price, "trade payment");
       const bidReserve = checkedMul(quantity, bid.price, "bid reserve spent");
       const refund = checkedSub(bidReserve, payment, "bid price improvement refund");
+      const coord = parseAccount(bid.account);
+      if (!coord) throw new Error("Market bid requires a physical account");
 
       addBalance(ledger, ask.agent, MONEY_ACCOUNT, "money", payment);
-      addBalance(ledger, bid.agent, account, "widget", quantity);
+      addBalance(ledger, bid.agent, bid.account, bid.resource, quantity);
       if (refund > 0) addBalance(ledger, bid.agent, MONEY_ACCOUNT, "money", refund);
 
       bid.remaining = checkedSub(bid.remaining, quantity, "bid remaining");
       ask.remaining = checkedSub(ask.remaining, quantity, "ask remaining");
-      trades.push({ ...coord, buyer: bid.agent, seller: ask.agent, quantity, price });
+      trades.push({ ...coord, resource: bid.resource, buyer: bid.agent, seller: ask.agent, quantity, price });
 
       if (bid.remaining === 0) bidIndex += 1;
       if (ask.remaining === 0) askIndex += 1;
@@ -316,6 +327,7 @@ function applyResourceGeneration(ledger: Ledger) {
   for (const agent of AGENTS) {
     for (const factory of cellsWith(ledger, agent, "factory")) {
       addBalance(ledger, agent, factory.account, "widget", checkedMul(factory.amount, 5, "factory output"));
+      addBalance(ledger, agent, factory.account, "electricity", checkedMul(factory.amount, 8, "factory power output"));
     }
     for (const population of cellsWith(ledger, agent, "population")) {
       addBalance(ledger, agent, MONEY_ACCOUNT, "money", checkedMul(population.amount, 6, "population income"));
@@ -325,11 +337,14 @@ function applyResourceGeneration(ledger: Ledger) {
 
 export function stepSimulation(state: SimState): SimState {
   const ledger = cloneLedger(state.ledger);
+  const powerGridInfrastructure = state.powerGridInfrastructure.clone();
   const orders: Order[] = [];
   const transports: Transport[] = [];
   const transportQuoteCache: TransportQuoteCache = new Map();
   let nextOrderId = state.nextOrderId;
 
+  powerGridInfrastructure.update();
+  syncPowerGridInfrastructureToLedger(ledger, powerGridInfrastructure);
   applyResourceGeneration(ledger);
 
   const apiFor = (agent: Agent) =>
@@ -353,12 +368,13 @@ export function stepSimulation(state: SimState): SimState {
     });
   }
 
-  const { trades, orderResults } = clearMarket(ledger, orders);
+  const { trades, orderResults } = clearMarket(ledger, orders, powerGridInfrastructure);
 
   return {
     turn: checkedAdd(state.turn, 1, "turn"),
     nextOrderId,
     ledger,
+    powerGridInfrastructure,
     orders,
     lastOrderResults: orderResults,
     trades,

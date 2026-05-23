@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { clearMarket, transportUnitCost } from "./engine";
 import { MONEY_ACCOUNT } from "./constants";
 import { accountOf, addBalance, makeLedger } from "./ledger";
+import { PowerGridInfrastructure } from "./powerGridInfrastructure";
 import type { Account, Ledger, Order } from "./types";
 
 function order(overrides: Partial<Order> & Pick<Order, "id" | "agent" | "side" | "price" | "quantity">): Order {
@@ -37,7 +38,9 @@ describe("clearMarket", () => {
       order({ id: 2, agent: "Producer", side: "ask", price: 8, quantity: 2 }),
     ]);
 
-    expect(result.trades).toEqual([{ x: 1, y: 1, buyer: "Consumer-1,1", seller: "Producer", quantity: 2, price: 9 }]);
+    expect(result.trades).toEqual([
+      { x: 1, y: 1, resource: "widget", buyer: "Consumer-1,1", seller: "Producer", quantity: 2, price: 9 },
+    ]);
     expect(balance(ledger, "Consumer-1,1", MONEY_ACCOUNT, "money")).toBe(82);
     expect(balance(ledger, "Consumer-1,1", cell, "widget")).toBe(2);
     expect(balance(ledger, "Producer", MONEY_ACCOUNT, "money")).toBe(18);
@@ -86,7 +89,9 @@ describe("clearMarket", () => {
       order({ id: 2, agent: "Producer", side: "ask", price: 6, quantity: 3 }),
     ]);
 
-    expect(result.trades).toEqual([{ x: 1, y: 1, buyer: "Consumer-1,1", seller: "Producer", quantity: 1, price: 8 }]);
+    expect(result.trades).toEqual([
+      { x: 1, y: 1, resource: "widget", buyer: "Consumer-1,1", seller: "Producer", quantity: 1, price: 8 },
+    ]);
     expect(result.orderResults).toEqual([
       expect.objectContaining({ id: 1, filled: 1, unfilled: 0 }),
       expect.objectContaining({ id: 2, filled: 1, unfilled: 2 }),
@@ -109,6 +114,59 @@ describe("clearMarket", () => {
     expect(result.trades).toEqual([]);
     expect(balance(ledger, "Consumer-1,1", MONEY_ACCOUNT, "money")).toBe(100);
     expect(balance(ledger, "Producer", askCell, "widget")).toBe(1);
+  });
+
+  it("clears electricity across all cells in the same power grid", () => {
+    const source = accountOf(1, 1);
+    const destination = accountOf(3, 1);
+    const ledger = marketLedger();
+    ledger.Producer = { [source]: { electricity: 2 } };
+    ledger["Consumer-1,1"] = { [MONEY_ACCOUNT]: { money: 50 } };
+    const infrastructure = new PowerGridInfrastructure();
+    infrastructure.set({ x: 1, y: 1 }, 1);
+    infrastructure.set({ x: 2, y: 1 }, 1);
+    infrastructure.set({ x: 3, y: 1 }, 1);
+    infrastructure.update();
+
+    const result = clearMarket(
+      ledger,
+      [
+        order({ id: 1, agent: "Consumer-1,1", account: destination, resource: "electricity", side: "bid", price: 10, quantity: 1 }),
+        order({ id: 2, agent: "Producer", account: source, resource: "electricity", side: "ask", price: 4, quantity: 1 }),
+      ],
+      infrastructure,
+    );
+
+    expect(result.trades).toEqual([
+      { x: 3, y: 1, resource: "electricity", buyer: "Consumer-1,1", seller: "Producer", quantity: 1, price: 7 },
+    ]);
+    expect(balance(ledger, "Consumer-1,1", destination, "electricity")).toBe(1);
+    expect(balance(ledger, "Producer", MONEY_ACCOUNT, "money")).toBe(7);
+  });
+
+  it("keeps electricity markets separate for disconnected power grids", () => {
+    const source = accountOf(1, 1);
+    const destination = accountOf(3, 1);
+    const ledger = marketLedger();
+    ledger.Producer = { [source]: { electricity: 0 } };
+    ledger["Consumer-1,1"] = { [MONEY_ACCOUNT]: { money: 40 } };
+    const infrastructure = new PowerGridInfrastructure();
+    infrastructure.set({ x: 1, y: 1 }, 1);
+    infrastructure.set({ x: 3, y: 1 }, 1);
+    infrastructure.update();
+
+    const result = clearMarket(
+      ledger,
+      [
+        order({ id: 1, agent: "Consumer-1,1", account: destination, resource: "electricity", side: "bid", price: 10, quantity: 1 }),
+        order({ id: 2, agent: "Producer", account: source, resource: "electricity", side: "ask", price: 4, quantity: 1 }),
+      ],
+      infrastructure,
+    );
+
+    expect(result.trades).toEqual([]);
+    expect(balance(ledger, "Consumer-1,1", MONEY_ACCOUNT, "money")).toBe(50);
+    expect(balance(ledger, "Producer", source, "electricity")).toBe(1);
   });
 });
 

@@ -1,8 +1,19 @@
+import type { PowerGridInfrastructure } from "./powerGridInfrastructure";
+
 export type ConsumerAgent = `Consumer-${number},${number}`;
 export type LogisticsAgent = `Logistics-${number}`;
 export type Agent = "Common" | "Producer" | LogisticsAgent | ConsumerAgent;
 export type AgentFamily = "Common" | "Producer" | "Consumer" | "Logistics";
-export type Resource = "money" | "widget" | "factory" | "population" | "road" | "congestion" | "last-congestion";
+export type TradableResource = "widget" | "electricity";
+export type Resource =
+  | "money"
+  | TradableResource
+  | "factory"
+  | "population"
+  | "road"
+  | "power-grid-infrastructure"
+  | "congestion"
+  | "last-congestion";
 export type Account = "" | `${number},${number}`;
 export type Side = "bid" | "ask";
 
@@ -17,7 +28,7 @@ export type Order = {
   id: number;
   agent: Agent;
   account: Account;
-  resource: "widget";
+  resource: TradableResource;
   side: Side;
   price: number;
   quantity: number;
@@ -28,7 +39,7 @@ export type OrderResult = {
   id: number;
   agent: Agent;
   account: Account;
-  resource: "widget";
+  resource: TradableResource;
   side: Side;
   price: number;
   quantity: number;
@@ -39,6 +50,7 @@ export type OrderResult = {
 export type Trade = {
   x: number;
   y: number;
+  resource?: TradableResource;
   buyer: Agent;
   seller: Agent;
   quantity: number;
@@ -61,6 +73,7 @@ export type SimState = {
   turn: number;
   nextOrderId: number;
   ledger: Ledger;
+  powerGridInfrastructure: PowerGridInfrastructure;
   orders: Order[];
   lastOrderResults: OrderResult[];
   trades: Trade[];
@@ -78,8 +91,8 @@ export type AgentApi = {
    * and misses without tagging orders with its own agent name.
    */
   lastOrderResults: OrderResult[];
-  placeBid: (account: Account, resource: "widget", price: number, quantity: number) => void;
-  placeAsk: (account: Account, resource: "widget", price: number, quantity: number) => void;
+  placeBid: (account: Account, resource: TradableResource, price: number, quantity: number) => void;
+  placeAsk: (account: Account, resource: TradableResource, price: number, quantity: number) => void;
   transportUnitCost: (from: Account, to: Account) => number;
   requestTransport: (from: Account, to: Account, resource: "widget", quantity: number) => void;
 };

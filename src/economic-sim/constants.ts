@@ -19,7 +19,17 @@ export const CONSUMER_AGENTS: ConsumerAgent[] = POPULATION_CELLS.map((cell) => c
 export const LOGISTICS_AGENTS: LogisticsAgent[] = ["Logistics-0", "Logistics-1"];
 
 export const AGENTS: Agent[] = ["Common", "Producer", ...CONSUMER_AGENTS, ...LOGISTICS_AGENTS];
-export const RESOURCES: Resource[] = ["money", "widget", "factory", "population", "road", "congestion", "last-congestion"];
+export const RESOURCES: Resource[] = [
+  "money",
+  "widget",
+  "electricity",
+  "factory",
+  "population",
+  "road",
+  "power-grid-infrastructure",
+  "congestion",
+  "last-congestion",
+];
 
 export const AGENT_COLORS: Record<AgentFamily, string> = {
   Common: "#94a3b8",

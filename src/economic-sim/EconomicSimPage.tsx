@@ -119,14 +119,21 @@ export function EconomicSimPage() {
     ? (() => {
         const [hoverX, hoverY] = hoverAccount.split(",").map(Number);
         const cellTrades = state.trades.filter((trade) => trade.x === hoverX && trade.y === hoverY);
+        const widgetTrades = cellTrades.filter((trade) => (trade.resource ?? "widget") === "widget");
+        const electricityTrades = cellTrades.filter((trade) => trade.resource === "electricity");
         const cellOrders = state.orders.filter((order) => order.account === hoverAccount);
-        const averageTrade = averageTradePrice(cellTrades);
-        const lastBid = orderSummary(cellOrders, "bid");
-        const lastAsk = orderSummary(cellOrders, "ask");
+        const averageTrade = averageTradePrice(widgetTrades);
+        const averagePowerTrade = averageTradePrice(electricityTrades);
+        const lastBid = orderSummary(cellOrders.filter((order) => order.resource === "widget"), "bid");
+        const lastAsk = orderSummary(cellOrders.filter((order) => order.resource === "widget"), "ask");
+        const lastPowerBid = orderSummary(cellOrders.filter((order) => order.resource === "electricity"), "bid");
+        const lastPowerAsk = orderSummary(cellOrders.filter((order) => order.resource === "electricity"), "ask");
         const modeledValue = modeledValueByCell.get(hoverAccount);
         const road = getBalance(state.ledger, "Common", hoverAccount, "road");
+        const powerGrid = getBalance(state.ledger, "Common", hoverAccount, "power-grid-infrastructure");
         const congestion = getBalance(state.ledger, "Common", hoverAccount, "congestion");
         const lastCongestion = getBalance(state.ledger, "Common", hoverAccount, "last-congestion");
+        const gridId = state.powerGridInfrastructure.gridIdAt(hoverAccount);
         const modeledValueText =
           modeledValue === undefined
             ? null
@@ -136,15 +143,19 @@ export function EconomicSimPage() {
         return [
           ...AGENTS.map((agent) => {
             const widgets = getBalance(state.ledger, agent, hoverAccount, "widget");
+            const electricity = getBalance(state.ledger, agent, hoverAccount, "electricity");
             const factories = getBalance(state.ledger, agent, hoverAccount, "factory");
             const population = getBalance(state.ledger, agent, hoverAccount, "population");
-            return `${agent}: ${widgets} widget, ${factories} factory, ${population} population`;
+            return `${agent}: ${widgets} widget, ${electricity} electricity, ${factories} factory, ${population} population`;
           }),
           ...(modeledValueText ? [modeledValueText] : []),
-          `Road: ${road}, congestion: ${congestion}, last: ${lastCongestion}`,
-          ...(lastBid ? [`Last bid avg: ${lastBid.price.toFixed(1)} over ${lastBid.quantity}`] : []),
-          ...(lastAsk ? [`Last ask avg: ${lastAsk.price.toFixed(1)} over ${lastAsk.quantity}`] : []),
-          ...(averageTrade ? [`Last trade avg: ${averageTrade.price.toFixed(1)} over ${averageTrade.quantity}`] : []),
+          `Road: ${road}, power grid: ${powerGrid}${gridId === null ? "" : ` (grid ${gridId})`}, congestion: ${congestion}, last: ${lastCongestion}`,
+          ...(lastBid ? [`Last widget bid avg: ${lastBid.price.toFixed(1)} over ${lastBid.quantity}`] : []),
+          ...(lastAsk ? [`Last widget ask avg: ${lastAsk.price.toFixed(1)} over ${lastAsk.quantity}`] : []),
+          ...(averageTrade ? [`Last widget trade avg: ${averageTrade.price.toFixed(1)} over ${averageTrade.quantity}`] : []),
+          ...(lastPowerBid ? [`Last power bid avg: ${lastPowerBid.price.toFixed(1)} over ${lastPowerBid.quantity}`] : []),
+          ...(lastPowerAsk ? [`Last power ask avg: ${lastPowerAsk.price.toFixed(1)} over ${lastPowerAsk.quantity}`] : []),
+          ...(averagePowerTrade ? [`Last power trade avg: ${averagePowerTrade.price.toFixed(1)} over ${averagePowerTrade.quantity}`] : []),
         ];
       })()
     : ["Hover a cell to inspect balances"];
@@ -232,9 +243,11 @@ export function EconomicSimPage() {
               <span />
               <span>Money</span>
               <span>Widgets</span>
+              <span>Power</span>
               <span>Factories</span>
               <span>Pop</span>
               <span>Road</span>
+              <span>Grid</span>
               <span>Cong</span>
               <span>Last</span>
             </div>
@@ -246,9 +259,11 @@ export function EconomicSimPage() {
                 </span>
                 <span>{row.money}</span>
                 <span>{row.widget}</span>
+                <span>{row.electricity}</span>
                 <span>{row.factory}</span>
                 <span>{row.population}</span>
                 <span>{row.road}</span>
+                <span>{row["power-grid-infrastructure"]}</span>
                 <span>{row.congestion}</span>
                 <span>{row["last-congestion"]}</span>
               </div>
