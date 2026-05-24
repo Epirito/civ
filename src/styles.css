@@ -301,7 +301,7 @@ h2 {
 .agent-resource-header,
 .agent-resource-row {
   display: grid;
-  grid-template-columns: minmax(82px, 1.2fr) repeat(7, minmax(42px, 0.8fr));
+  grid-template-columns: minmax(82px, 1.2fr) repeat(10, minmax(42px, 0.8fr));
   align-items: center;
   gap: 6px;
 }

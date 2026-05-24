@@ -1,7 +1,7 @@
 import { CONSUMER_AGENTS, MONEY_ACCOUNT } from "./constants";
-import { transportTotalCost } from "./engine";
+import { electricityTransportLoss, transportTotalCost } from "./engine";
 import { checkedAdd, checkedMul, parseAccount } from "./ledger";
-import type { Account, AgentApi, AgentPolicyContext, CellBalance, OrderResult, Trade } from "./types";
+import type { Account, AgentApi, AgentPolicyContext, CellBalance, MarketResource, OrderResult, Trade } from "./types";
 
 const HISTORY_LIMIT = 6;
 const DISCOUNT = 0.92;
@@ -10,6 +10,7 @@ const BOOTSTRAP_FACTORY_BID_PRICE = 10;
 const MAX_ORDER_PRICE = 32;
 const MAX_BUY_CHUNKS_PER_SOURCE = 6;
 const MAX_PLANNING_CHUNKS = 128;
+const ELECTRICITY_GROSS_CHUNK = 20;
 
 type SaleTurn = {
   quantity: number;
@@ -59,31 +60,32 @@ function sameCellTrade(account: Account, trade: Trade) {
   return trade.x === coord.x && trade.y === coord.y;
 }
 
-function observedWidgetPrice(trades: Trade[], account: Account) {
+function observedPrice(trades: Trade[], account: Account, resource: MarketResource) {
   let quantity = 0;
   let value = 0;
   for (const trade of trades) {
-    if (!sameCellTrade(account, trade)) continue;
+    if (trade.resource !== resource || !sameCellTrade(account, trade)) continue;
     quantity += trade.quantity;
     value += trade.quantity * trade.price;
   }
   return quantity === 0 ? null : value / quantity;
 }
 
-function maxObservedMapPrice(trades: Trade[]) {
+function maxObservedMapPrice(trades: Trade[], resource: MarketResource = "widget") {
   let maxPrice: number | null = null;
   for (const trade of trades) {
+    if (trade.resource !== resource) continue;
     maxPrice = Math.max(maxPrice ?? trade.price, trade.price);
   }
   return maxPrice;
 }
 
-function lastAskResult(results: OrderResult[], account: Account) {
-  return results.find((result) => result.side === "ask" && result.resource === "widget" && result.account === account);
+function lastAskResult(results: OrderResult[], account: Account, resource: MarketResource = "widget") {
+  return results.find((result) => result.side === "ask" && result.resource === resource && result.account === account);
 }
 
-function bidResults(results: OrderResult[], account: Account) {
-  return results.filter((result) => result.side === "bid" && result.resource === "widget" && result.account === account);
+function bidResults(results: OrderResult[], account: Account, resource: MarketResource = "widget") {
+  return results.filter((result) => result.side === "bid" && result.resource === resource && result.account === account);
 }
 
 function isLogisticsAgent(agent: string) {
@@ -116,7 +118,7 @@ export class OptimisticLocalSaleValueModel {
     let value = 0;
     let logisticsSaleQuantity = 0;
     for (const trade of trades) {
-      if (!sameCellTrade(this.account, trade)) continue;
+      if (trade.resource !== "widget" || !sameCellTrade(this.account, trade)) continue;
       quantity += trade.quantity;
       value += checkedMul(trade.quantity, trade.price, "local trade value");
       if (isLogisticsAgent(trade.seller)) logisticsSaleQuantity += trade.quantity;
@@ -342,11 +344,79 @@ export class LogisticsMarketPlanner {
   }
 
   private sourceBidPrice(lastTrades: Trade[], source: Account) {
-    const observedPrice = observedWidgetPrice(lastTrades, source) ?? BOOTSTRAP_FACTORY_BID_PRICE;
-    return Math.max(1, Math.min(MAX_ORDER_PRICE, Math.round(observedPrice)));
+    const price = observedPrice(lastTrades, source, "widget") ?? BOOTSTRAP_FACTORY_BID_PRICE;
+    return Math.max(1, Math.min(MAX_ORDER_PRICE, Math.round(price)));
+  }
+
+}
+
+export class ElectricityLogisticsPlanner {
+  run(api: AgentApi, { publicLastOrderResults }: AgentPolicyContext) {
+    const destinations = [
+      ...api.observeCells("Producer", "factory"),
+      ...CONSUMER_AGENTS.flatMap((agent) => api.observeCells(agent, "population")),
+    ];
+    if (destinations.length === 0) return;
+
+    const demandPrice = (account: Account) => {
+      const bids = bidResults(publicLastOrderResults, account, "electricity");
+      if (bids.length === 0) return 6;
+      const quantity = bids.reduce((sum, bid) => sum + bid.quantity, 0);
+      const value = bids.reduce((sum, bid) => sum + checkedMul(bid.quantity, bid.price, "electricity bid value"), 0);
+      return quantity === 0 ? 6 : Math.max(1, Math.round(value / quantity));
+    };
+
+    for (const source of api.cellsWith("electricity")) {
+      let remaining = source.amount;
+      while (remaining > 0) {
+        const gross = Math.min(ELECTRICITY_GROSS_CHUNK, remaining);
+        const candidate = sortByValueDesc(
+          destinations
+            .filter((destination) => destination.account !== source.account)
+            .map((destination) => {
+              const factor = api.electricityDeliveryFactor(source.account, destination.account);
+              const loss = factor === null ? gross : electricityTransportLoss(gross, factor);
+              const delivered = gross - loss;
+              return { destination, factor, gross, delivered, value: delivered * demandPrice(destination.account) };
+            })
+            .filter((candidate) => candidate.factor !== null && candidate.delivered > 0),
+          (candidate) => candidate.value,
+        )[0];
+        if (!candidate || candidate.value <= 0) break;
+        api.requestElectricityTransportGross(source.account, candidate.destination.account, candidate.gross);
+        remaining -= candidate.gross;
+      }
+    }
+
+    for (const destination of destinations) {
+      const available = Math.floor(api.balance(destination.account, "electricity"));
+      if (available > 0) api.placeAsk(destination.account, "electricity", demandPrice(destination.account), available);
+    }
+
+    for (const source of api.observeCells("Producer", "power-plant")) {
+      const reachableValue = Math.max(
+        0,
+        ...destinations.map((destination) => {
+          const factor = api.electricityDeliveryFactor(source.account, destination.account);
+          if (factor === null) return 0;
+          const delivered = ELECTRICITY_GROSS_CHUNK - electricityTransportLoss(ELECTRICITY_GROSS_CHUNK, factor);
+          return delivered * demandPrice(destination.account);
+        }),
+      );
+      if (reachableValue > ELECTRICITY_GROSS_CHUNK * 3) {
+        const price = 3;
+        const affordableQuantity = Math.floor(api.balance(MONEY_ACCOUNT, "money") / price);
+        const quantity = Math.min(ELECTRICITY_GROSS_CHUNK, affordableQuantity);
+        if (quantity > 0) api.placeBid(source.account, "electricity", price, quantity);
+      }
+    }
   }
 }
 
 export function createLogisticsMarketPlanner() {
   return new LogisticsMarketPlanner();
+}
+
+export function createElectricityLogisticsPlanner() {
+  return new ElectricityLogisticsPlanner();
 }

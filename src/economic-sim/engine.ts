@@ -14,15 +14,21 @@ import {
   reserveBalance,
   setBalance,
 } from "./ledger";
-import type { Account, Agent, AgentApi, Ledger, Order, OrderResult, SimState, Trade, Transport } from "./types";
+import type { Account, Agent, AgentApi, Ledger, MarketResource, Order, OrderResult, SimState, Trade, Transport } from "./types";
 
 type TransportQuote = {
   path: Account[];
   unitCost: number;
-  congestionAccount: Account | undefined;
+};
+
+type ElectricityTransportQuote = {
+  path: Account[];
+  deliveryFactor: number;
 };
 
 type TransportQuoteCache = Map<string, TransportQuote>;
+type ElectricityTransportQuoteCache = Map<string, ElectricityTransportQuote | null>;
+const ELECTRICITY_LINE_EFFICIENCY = 19 / 20;
 
 function sortByValueAsc<T>(items: T[], value: (item: T) => number, value2?: (item: T) => number) {
   return [...items].sort((a, b) => {
@@ -58,20 +64,21 @@ function placeOrder(
 
 export function clearMarket(ledger: Ledger, orders: Order[]) {
   const trades: Trade[] = [];
-  const grouped = new Map<Account, { bids: Order[]; asks: Order[] }>();
+  const grouped = new Map<string, { account: Account; resource: MarketResource; bids: Order[]; asks: Order[] }>();
 
   for (const order of orders) {
-    const group = grouped.get(order.account) ?? { bids: [], asks: [] };
+    const key = `${order.account}|${order.resource}`;
+    const group = grouped.get(key) ?? { account: order.account, resource: order.resource, bids: [], asks: [] };
     if (order.side === "bid") group.bids.push(order);
     else group.asks.push(order);
-    grouped.set(order.account, group);
+    grouped.set(key, group);
   }
 
-  for (const [account, group] of grouped) {
+  for (const { account, resource, bids: groupBids, asks: groupAsks } of grouped.values()) {
     const coord = parseAccount(account);
     if (!coord) continue;
-    const bids = sortByValueAsc(group.bids, (order) => -order.price, (order) => order.id);
-    const asks = sortByValueAsc(group.asks, (order) => order.price, (order) => order.id);
+    const bids = sortByValueAsc(groupBids, (order) => -order.price, (order) => order.id);
+    const asks = sortByValueAsc(groupAsks, (order) => order.price, (order) => order.id);
     let bidIndex = 0;
     let askIndex = 0;
 
@@ -86,12 +93,12 @@ export function clearMarket(ledger: Ledger, orders: Order[]) {
       const refund = checkedSub(bidReserve, payment, "bid price improvement refund");
 
       addBalance(ledger, ask.agent, MONEY_ACCOUNT, "money", payment);
-      addBalance(ledger, bid.agent, account, "widget", quantity);
+      addBalance(ledger, bid.agent, account, resource, quantity);
       if (refund > 0) addBalance(ledger, bid.agent, MONEY_ACCOUNT, "money", refund);
 
       bid.remaining = checkedSub(bid.remaining, quantity, "bid remaining");
       ask.remaining = checkedSub(ask.remaining, quantity, "ask remaining");
-      trades.push({ ...coord, buyer: bid.agent, seller: ask.agent, quantity, price });
+      trades.push({ ...coord, resource, buyer: bid.agent, seller: ask.agent, quantity, price });
 
       if (bid.remaining === 0) bidIndex += 1;
       if (ask.remaining === 0) askIndex += 1;
@@ -145,6 +152,10 @@ function neighbors({ x, y }: { x: number; y: number }) {
     { x, y: y + 1 },
     { x, y: y - 1 },
   ].filter((coord) => coord.x >= 0 && coord.x < GRID_WIDTH && coord.y >= 0 && coord.y < GRID_HEIGHT);
+}
+
+function hasPowerLine(ledger: Ledger, account: Account) {
+  return getBalance(ledger, "Common", account, "power-line") > 0;
 }
 
 function comparePhysicalAccounts(a: Account, b: Account) {
@@ -202,6 +213,42 @@ export function transportPath(ledger: Ledger, from: Account, to: Account) {
   return path;
 }
 
+export function electricityTransportPath(ledger: Ledger, from: Account, to: Account) {
+  const fromCoord = parseAccount(from);
+  const toCoord = parseAccount(to);
+  if (!fromCoord || !toCoord) throw new Error("Electricity transport requires physical cell accounts");
+  if (!hasPowerLine(ledger, from) || !hasPowerLine(ledger, to)) return null;
+  if (from === to) return [from];
+
+  const queue: Account[] = [from];
+  const seen = new Set<Account>([from]);
+  const previous = new Map<Account, Account>();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) break;
+    if (current === to) break;
+    const coord = parseAccount(current);
+    if (!coord) continue;
+    for (const neighbor of neighbors(coord)) {
+      const account = `${neighbor.x},${neighbor.y}` as Account;
+      if (seen.has(account) || !hasPowerLine(ledger, account)) continue;
+      seen.add(account);
+      previous.set(account, current);
+      queue.push(account);
+    }
+  }
+
+  if (!seen.has(to)) return null;
+  const path = [to];
+  while (path[0] !== from) {
+    const before = previous.get(path[0]);
+    if (!before) return null;
+    path.unshift(before);
+  }
+  return path;
+}
+
 function pathUnitCost(ledger: Ledger, path: Account[]) {
   return path.slice(1).reduce((sum, account) => sum + localTransportUnitCost(ledger, account), 0);
 }
@@ -209,11 +256,9 @@ function pathUnitCost(ledger: Ledger, path: Account[]) {
 function createTransportQuote(ledger: Ledger, from: Account, to: Account): TransportQuote {
   const [canonicalFrom, canonicalTo] = canonicalTransportPair(from, to);
   const path = transportPath(ledger, canonicalFrom, canonicalTo);
-  const congestionAccount = path[Math.floor(Math.random() * path.length)];
   return {
     path,
     unitCost: pathUnitCost(ledger, path),
-    congestionAccount,
   };
 }
 
@@ -226,13 +271,48 @@ function transportQuote(ledger: Ledger, cache: TransportQuoteCache, from: Accoun
   return quote;
 }
 
-function quotePathForDirection(quote: TransportQuote, from: Account, to: Account) {
+function createElectricityTransportQuote(ledger: Ledger, from: Account, to: Account): ElectricityTransportQuote | null {
+  const [canonicalFrom, canonicalTo] = canonicalTransportPair(from, to);
+  const path = electricityTransportPath(ledger, canonicalFrom, canonicalTo);
+  if (!path) return null;
+  return {
+    path,
+    deliveryFactor: ELECTRICITY_LINE_EFFICIENCY ** Math.max(0, path.length - 1),
+  };
+}
+
+function electricityTransportQuote(
+  ledger: Ledger,
+  cache: ElectricityTransportQuoteCache,
+  from: Account,
+  to: Account,
+) {
+  const key = transportPairKey(from, to);
+  if (cache.has(key)) return cache.get(key) ?? null;
+  const quote = createElectricityTransportQuote(ledger, from, to);
+  cache.set(key, quote);
+  return quote;
+}
+
+function quotePathForDirection(quote: { path: Account[] }, from: Account, to: Account) {
   if (quote.path[0] === from && quote.path[quote.path.length - 1] === to) return quote.path;
   return [...quote.path].reverse();
 }
 
 export function transportUnitCost(ledger: Ledger, from: Account, to: Account) {
   return createTransportQuote(ledger, from, to).unitCost;
+}
+
+export function electricityDeliveryFactor(ledger: Ledger, from: Account, to: Account) {
+  return createElectricityTransportQuote(ledger, from, to)?.deliveryFactor ?? null;
+}
+
+export function electricityTransportLoss(grossQuantity: number, deliveryFactor: number) {
+  assertSafeAmount(grossQuantity, "gross electricity transport quantity");
+  if (!Number.isFinite(deliveryFactor) || deliveryFactor < 0 || deliveryFactor > 1) {
+    throw new Error(`electricity delivery factor is invalid: ${deliveryFactor}`);
+  }
+  return Math.min(grossQuantity, Math.ceil(grossQuantity * (1 - deliveryFactor)));
 }
 
 export function transportTotalCost(quantity: number, unitCost: number) {
@@ -257,6 +337,7 @@ function createAgentApi(
   orders: Order[],
   transports: Transport[],
   transportQuoteCache: TransportQuoteCache,
+  electricityTransportQuoteCache: ElectricityTransportQuoteCache,
   lastOrderResults: OrderResult[],
   getNextOrderId: () => number,
   setNextOrderId: (nextOrderId: number) => void,
@@ -277,6 +358,8 @@ function createAgentApi(
       submitOrder({ account, resource, side: "ask", price, quantity });
     },
     transportUnitCost: (from, to) => transportQuote(ledger, transportQuoteCache, from, to).unitCost,
+    electricityDeliveryFactor: (from, to) =>
+      electricityTransportQuote(ledger, electricityTransportQuoteCache, from, to)?.deliveryFactor ?? null,
     requestTransport: (from, to, resource, requestedQuantity) => {
       assertSafeAmount(requestedQuantity, "transport quantity");
       if (requestedQuantity === 0 || from === to) return;
@@ -292,13 +375,37 @@ function createAgentApi(
       reserveBalance(ledger, agent, from, resource, quantity);
       reserveBalance(ledger, agent, MONEY_ACCOUNT, "money", totalCost);
       addBalance(ledger, agent, to, resource, quantity);
-      if (quote.congestionAccount) {
-        addBalance(ledger, "Common", quote.congestionAccount, "congestion", quantity);
+      for (const account of path) {
+        addBalance(ledger, "Common", account, "congestion", quantity);
       }
       transports.push({ agent, from, to, resource, quantity, cost: totalCost, path });
       if (agent.startsWith("Logistics-")) {
         console.log("Logistics transported widgets", { from, to, quantity, cost: totalCost });
       }
+    },
+    requestElectricityTransportGross: (from, to, grossQuantity) => {
+      assertSafeAmount(grossQuantity, "gross electricity transport quantity");
+      if (grossQuantity === 0 || from === to) return;
+      const quote = electricityTransportQuote(ledger, electricityTransportQuoteCache, from, to);
+      if (!quote) return;
+      const path = quotePathForDirection(quote, from, to);
+      const available = getBalance(ledger, agent, from, "electricity");
+      const grossSpent = Math.min(grossQuantity, available);
+      if (grossSpent <= 0) return;
+      const loss = electricityTransportLoss(grossSpent, quote.deliveryFactor);
+      const deliveredQuantity = checkedSub(grossSpent, loss, "delivered electricity");
+      reserveBalance(ledger, agent, from, "electricity", grossSpent);
+      addBalance(ledger, agent, to, "electricity", deliveredQuantity);
+      transports.push({
+        agent,
+        from,
+        to,
+        resource: "electricity",
+        quantity: grossSpent,
+        deliveredQuantity,
+        cost: loss,
+        path,
+      });
     },
   };
 }
@@ -314,10 +421,22 @@ function applyResourceGeneration(ledger: Ledger) {
     setBalance(ledger, "Common", account, "congestion", 0);
   }
   for (const agent of AGENTS) {
+    for (const powerPlant of cellsWith(ledger, agent, "power-plant")) {
+      addBalance(ledger, agent, powerPlant.account, "electricity", checkedMul(powerPlant.amount, 80, "power output"));
+    }
     for (const factory of cellsWith(ledger, agent, "factory")) {
-      addBalance(ledger, agent, factory.account, "widget", checkedMul(factory.amount, 5, "factory output"));
+      const availableElectricity = getBalance(ledger, agent, factory.account, "electricity");
+      const poweredFactories = Math.min(factory.amount, Math.floor(availableElectricity));
+      if (poweredFactories > 0) {
+        reserveBalance(ledger, agent, factory.account, "electricity", poweredFactories);
+        addBalance(ledger, agent, factory.account, "widget", checkedMul(poweredFactories, 5, "factory output"));
+      }
     }
     for (const population of cellsWith(ledger, agent, "population")) {
+      const consumedElectricity = Math.min(population.amount, getBalance(ledger, agent, population.account, "electricity"));
+      if (consumedElectricity > 0) {
+        reserveBalance(ledger, agent, population.account, "electricity", consumedElectricity);
+      }
       addBalance(ledger, agent, MONEY_ACCOUNT, "money", checkedMul(population.amount, 6, "population income"));
     }
   }
@@ -328,6 +447,7 @@ export function stepSimulation(state: SimState): SimState {
   const orders: Order[] = [];
   const transports: Transport[] = [];
   const transportQuoteCache: TransportQuoteCache = new Map();
+  const electricityTransportQuoteCache: ElectricityTransportQuoteCache = new Map();
   let nextOrderId = state.nextOrderId;
 
   applyResourceGeneration(ledger);
@@ -339,6 +459,7 @@ export function stepSimulation(state: SimState): SimState {
       orders,
       transports,
       transportQuoteCache,
+      electricityTransportQuoteCache,
       state.lastOrderResults.filter((result) => result.agent === agent),
       () => nextOrderId,
       (updatedNextOrderId) => {

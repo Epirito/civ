@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MONEY_ACCOUNT, consumerAgentFor } from "./constants";
 import { accountOf } from "./ledger";
-import { createLogisticsMarketPlanner } from "./logisticsPlanner";
+import { createElectricityLogisticsPlanner, createLogisticsMarketPlanner } from "./logisticsPlanner";
 import type { Account, Agent, AgentApi, CellBalance, OrderResult, Resource, Trade } from "./types";
 
 type Balances = Partial<Record<Agent, Record<string, Partial<Record<Resource, number>>>>>;
@@ -39,15 +39,15 @@ function bidResult(agent: Agent, account: Account, price: number, quantity: numb
   };
 }
 
-function makeApi(balances: Balances) {
+function makeApi(balances: Balances, self: Agent = "Logistics-0") {
   const transports: Array<{ from: Account; to: Account; quantity: number }> = [];
   const asks: Array<{ account: Account; price: number; quantity: number }> = [];
   const bids: Array<{ account: Account; price: number; quantity: number }> = [];
 
   const api: AgentApi = {
-    balance: (account, resource) => getBalance(balances, "Logistics-0", account, resource),
+    balance: (account, resource) => getBalance(balances, self, account, resource),
     cellsWith: (resource) =>
-      Object.entries(balances["Logistics-0"] ?? {})
+      Object.entries(balances[self] ?? {})
         .filter(([account, resources]) => account !== MONEY_ACCOUNT && (resources[resource] ?? 0) > 0)
         .map(([account, resources]) => cell(account as Account, resources[resource] ?? 0)),
     observeCells: (agent, resource) =>
@@ -56,7 +56,10 @@ function makeApi(balances: Balances) {
         .map(([account, resources]) => cell(account as Account, resources[resource] ?? 0)),
     lastOrderResults: [],
     placeBid: (account, _resource, price, quantity) => {
-      addBalance(balances, "Logistics-0", MONEY_ACCOUNT, "money", -price * quantity);
+      if (price * quantity > getBalance(balances, self, MONEY_ACCOUNT, "money")) {
+        throw new Error("reserve money would go negative");
+      }
+      addBalance(balances, self, MONEY_ACCOUNT, "money", -price * quantity);
       bids.push({ account, price, quantity });
     },
     placeAsk: (account, _resource, price, quantity) => {
@@ -66,13 +69,27 @@ function makeApi(balances: Balances) {
       (Math.abs(Number(from.split(",")[0]) - Number(to.split(",")[0])) +
         Math.abs(Number(from.split(",")[1]) - Number(to.split(",")[1]))) /
       3,
+    electricityDeliveryFactor: (from, to) => {
+      const distance =
+        Math.abs(Number(from.split(",")[0]) - Number(to.split(",")[0])) +
+        Math.abs(Number(from.split(",")[1]) - Number(to.split(",")[1]));
+      return (19 / 20) ** distance;
+    },
     requestTransport: (from, to, _resource, quantity) => {
       const unitCost = api.transportUnitCost(from, to);
       const cost = Math.max(1, Math.ceil(quantity * unitCost));
-      addBalance(balances, "Logistics-0", from, "widget", -quantity);
-      addBalance(balances, "Logistics-0", MONEY_ACCOUNT, "money", -cost);
-      addBalance(balances, "Logistics-0", to, "widget", quantity);
+      addBalance(balances, self, from, "widget", -quantity);
+      addBalance(balances, self, MONEY_ACCOUNT, "money", -cost);
+      addBalance(balances, self, to, "widget", quantity);
       transports.push({ from, to, quantity });
+    },
+    requestElectricityTransportGross: (from, to, grossQuantity) => {
+      const factor = api.electricityDeliveryFactor(from, to) ?? 0;
+      const grossSpent = Math.min(grossQuantity, getBalance(balances, self, from, "electricity"));
+      const delivered = grossSpent - Math.ceil(grossSpent * (1 - factor));
+      addBalance(balances, self, from, "electricity", -grossSpent);
+      addBalance(balances, self, to, "electricity", delivered);
+      transports.push({ from, to, quantity: grossSpent });
     },
   };
 
@@ -91,7 +108,7 @@ describe("LogisticsMarketPlanner", () => {
     };
     const { api, transports, asks, bids } = makeApi(balances);
     api.lastOrderResults.push(bidResult(consumer, destination, 20, 2, 2));
-    const trades: Trade[] = [{ x: 5, y: 5, buyer: consumer, seller: "Producer", quantity: 2, price: 20 }];
+    const trades: Trade[] = [{ x: 5, y: 5, resource: "widget", buyer: consumer, seller: "Producer", quantity: 2, price: 20 }];
 
     createLogisticsMarketPlanner().run(api, { lastTrades: trades, publicLastOrderResults: api.lastOrderResults });
 
@@ -115,8 +132,8 @@ describe("LogisticsMarketPlanner", () => {
     api.lastOrderResults.push(bidResult(sourceConsumer, source, 20, 1));
     api.lastOrderResults.push(bidResult(destinationConsumer, destination, 20, 1));
     const trades: Trade[] = [
-      { x: 5, y: 5, buyer: sourceConsumer, seller: "Producer", quantity: 1, price: 20 },
-      { x: 9, y: 13, buyer: destinationConsumer, seller: "Producer", quantity: 1, price: 20 },
+      { x: 5, y: 5, resource: "widget", buyer: sourceConsumer, seller: "Producer", quantity: 1, price: 20 },
+      { x: 9, y: 13, resource: "widget", buyer: destinationConsumer, seller: "Producer", quantity: 1, price: 20 },
     ];
 
     createLogisticsMarketPlanner().run(api, { lastTrades: trades, publicLastOrderResults: api.lastOrderResults });
@@ -146,7 +163,7 @@ describe("LogisticsMarketPlanner", () => {
       unfilled: 0,
     });
     api.lastOrderResults.push(bidResult(consumer, destination, 20, 1));
-    const trades: Trade[] = [{ x: 5, y: 5, buyer: consumer, seller: "Logistics-0", quantity: 1, price: 20 }];
+    const trades: Trade[] = [{ x: 5, y: 5, resource: "widget", buyer: consumer, seller: "Logistics-0", quantity: 1, price: 20 }];
 
     createLogisticsMarketPlanner().run(api, { lastTrades: trades, publicLastOrderResults: api.lastOrderResults });
 
@@ -176,7 +193,7 @@ describe("LogisticsMarketPlanner", () => {
     });
     api.lastOrderResults.push(bidResult(consumer, destination, 20, 1));
 
-    planner.run(api, { lastTrades: [{ x: 5, y: 5, buyer: consumer, seller: "Logistics-0", quantity: 1, price: 20 }], publicLastOrderResults: api.lastOrderResults });
+    planner.run(api, { lastTrades: [{ x: 5, y: 5, resource: "widget", buyer: consumer, seller: "Logistics-0", quantity: 1, price: 20 }], publicLastOrderResults: api.lastOrderResults });
 
     expect(planner.valueByCell(api, []).get(destination)).toBeCloseTo(20 * 0.92 ** 3);
     expect(asks).toEqual([{ account: destination, price: 22, quantity: 3 }]);
@@ -238,7 +255,7 @@ describe("LogisticsMarketPlanner", () => {
       unfilled: 1,
     });
     api.lastOrderResults.push(bidResult(consumer, destination, 30, 3));
-    const trades: Trade[] = [{ x: 5, y: 5, buyer: consumer, seller: "Producer", quantity: 3, price: 30 }];
+    const trades: Trade[] = [{ x: 5, y: 5, resource: "widget", buyer: consumer, seller: "Producer", quantity: 3, price: 30 }];
 
     createLogisticsMarketPlanner().run(api, { lastTrades: trades, publicLastOrderResults: api.lastOrderResults });
 
@@ -257,7 +274,7 @@ describe("LogisticsMarketPlanner", () => {
     };
     const { api, transports, asks, bids } = makeApi(balances);
     api.lastOrderResults.push(bidResult(consumer, destination, 20, 2, 2));
-    const trades: Trade[] = [{ x: 5, y: 5, buyer: consumer, seller: "Producer", quantity: 2, price: 20 }];
+    const trades: Trade[] = [{ x: 5, y: 5, resource: "widget", buyer: consumer, seller: "Producer", quantity: 2, price: 20 }];
 
     createLogisticsMarketPlanner().run(api, { lastTrades: trades, publicLastOrderResults: api.lastOrderResults });
 
@@ -296,5 +313,33 @@ describe("LogisticsMarketPlanner", () => {
 
     expect(transports).toEqual([]);
     expect(asks).toEqual([]);
+  });
+
+  it("does not bid for source electricity when electricity logistics cannot afford it", () => {
+    const source = accountOf(2, 2);
+    const destination = accountOf(5, 5);
+    const consumer = consumerAgentFor(5, 5);
+    const balances: Balances = {
+      Producer: { [source]: { "power-plant": 1 } },
+      [consumer]: { [destination]: { population: 1 } },
+      ElectricityLogistics: { [MONEY_ACCOUNT]: { money: 2 } },
+    };
+    const { api, bids } = makeApi(balances, "ElectricityLogistics");
+    api.lastOrderResults.push({
+      id: 1,
+      agent: consumer,
+      account: destination,
+      resource: "electricity",
+      side: "bid",
+      price: 8,
+      quantity: 5,
+      filled: 0,
+      unfilled: 5,
+    });
+
+    expect(() =>
+      createElectricityLogisticsPlanner().run(api, { lastTrades: [], publicLastOrderResults: api.lastOrderResults }),
+    ).not.toThrow();
+    expect(bids).toEqual([]);
   });
 });

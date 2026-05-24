@@ -1,8 +1,20 @@
 export type ConsumerAgent = `Consumer-${number},${number}`;
 export type LogisticsAgent = `Logistics-${number}`;
-export type Agent = "Common" | "Producer" | LogisticsAgent | ConsumerAgent;
-export type AgentFamily = "Common" | "Producer" | "Consumer" | "Logistics";
-export type Resource = "money" | "widget" | "factory" | "population" | "road" | "congestion" | "last-congestion";
+export type ElectricityLogisticsAgent = "ElectricityLogistics";
+export type Agent = "Common" | "Producer" | LogisticsAgent | ElectricityLogisticsAgent | ConsumerAgent;
+export type AgentFamily = "Common" | "Producer" | "Consumer" | "Logistics" | "ElectricityLogistics";
+export type Resource =
+  | "money"
+  | "widget"
+  | "factory"
+  | "population"
+  | "road"
+  | "congestion"
+  | "last-congestion"
+  | "electricity"
+  | "power-line"
+  | "power-plant";
+export type MarketResource = "widget" | "electricity";
 export type Account = "" | `${number},${number}`;
 export type Side = "bid" | "ask";
 
@@ -17,7 +29,7 @@ export type Order = {
   id: number;
   agent: Agent;
   account: Account;
-  resource: "widget";
+  resource: MarketResource;
   side: Side;
   price: number;
   quantity: number;
@@ -28,7 +40,7 @@ export type OrderResult = {
   id: number;
   agent: Agent;
   account: Account;
-  resource: "widget";
+  resource: MarketResource;
   side: Side;
   price: number;
   quantity: number;
@@ -39,6 +51,7 @@ export type OrderResult = {
 export type Trade = {
   x: number;
   y: number;
+  resource: MarketResource;
   buyer: Agent;
   seller: Agent;
   quantity: number;
@@ -49,10 +62,11 @@ export type Transport = {
   agent: Agent;
   from: Account;
   to: Account;
-  resource: "widget";
+  resource: MarketResource;
   quantity: number;
   cost: number;
   path: Account[];
+  deliveredQuantity?: number;
 };
 
 export type Ledger = Record<Agent, Record<string, Partial<Record<Resource, number>>>>;
@@ -78,10 +92,12 @@ export type AgentApi = {
    * and misses without tagging orders with its own agent name.
    */
   lastOrderResults: OrderResult[];
-  placeBid: (account: Account, resource: "widget", price: number, quantity: number) => void;
-  placeAsk: (account: Account, resource: "widget", price: number, quantity: number) => void;
+  placeBid: (account: Account, resource: MarketResource, price: number, quantity: number) => void;
+  placeAsk: (account: Account, resource: MarketResource, price: number, quantity: number) => void;
   transportUnitCost: (from: Account, to: Account) => number;
+  electricityDeliveryFactor: (from: Account, to: Account) => number | null;
   requestTransport: (from: Account, to: Account, resource: "widget", quantity: number) => void;
+  requestElectricityTransportGross: (from: Account, to: Account, grossQuantity: number) => void;
 };
 
 export type AgentPolicyContext = {

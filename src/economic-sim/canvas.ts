@@ -18,15 +18,27 @@ export type DrawSimOptions = {
 function cellMetrics(state: SimState) {
   const metrics = new Map<
     Account,
-    { logisticsWidgets: number; factories: number; population: number; road: number; lastCongestion: number }
+    {
+      logisticsWidgets: number;
+      logisticsElectricity: number;
+      factories: number;
+      population: number;
+      road: number;
+      lastCongestion: number;
+      powerLine: number;
+      powerPlant: number;
+    }
   >();
   const ensure = (account: Account) => {
     const current = metrics.get(account) ?? {
       logisticsWidgets: 0,
+      logisticsElectricity: 0,
       factories: 0,
       population: 0,
       road: 0,
       lastCongestion: 0,
+      powerLine: 0,
+      powerPlant: 0,
     };
     metrics.set(account, current);
     return current;
@@ -38,11 +50,14 @@ function cellMetrics(state: SimState) {
       if (account === "") continue;
       const metric = ensure(account);
       if (agentFamily(agent) === "Logistics") metric.logisticsWidgets += resources.widget ?? 0;
+      if (agentFamily(agent) === "ElectricityLogistics") metric.logisticsElectricity += resources.electricity ?? 0;
       metric.factories += resources.factory ?? 0;
       metric.population += resources.population ?? 0;
+      metric.powerPlant += resources["power-plant"] ?? 0;
       if (agent === "Common") {
         metric.road += resources.road ?? 0;
         metric.lastCongestion += resources["last-congestion"] ?? 0;
+        metric.powerLine += resources["power-line"] ?? 0;
       }
     }
   }
@@ -102,10 +117,13 @@ export function drawSim(canvas: HTMLCanvasElement, state: SimState, hover: Coord
       const px = originX + x * cellSize;
       const py = originY + y * cellSize;
       const logisticsWidgets = metric?.logisticsWidgets ?? 0;
+      const logisticsElectricity = metric?.logisticsElectricity ?? 0;
       const population = metric?.population ?? 0;
       const factories = metric?.factories ?? 0;
       const road = metric?.road ?? 0;
       const lastCongestion = metric?.lastCongestion ?? 0;
+      const powerLine = metric?.powerLine ?? 0;
+      const powerPlant = metric?.powerPlant ?? 0;
       context.fillStyle = "#18312d";
       context.fillRect(px, py, cellSize - 1, cellSize - 1);
       if (showRoadHeatmap && road > 0) {
@@ -145,9 +163,32 @@ export function drawSim(canvas: HTMLCanvasElement, state: SimState, hover: Coord
         context.arc(px + cellSize * 0.28, py + cellSize * 0.7, Math.min(8, 2 + population), 0, Math.PI * 2);
         context.fill();
       }
+      if (powerLine > 0) {
+        context.strokeStyle = "rgba(96, 165, 250, 0.72)";
+        context.lineWidth = Math.max(1, Math.min(3, cellSize * 0.08));
+        context.beginPath();
+        context.moveTo(px + cellSize * 0.18, py + cellSize * 0.5);
+        context.lineTo(px + cellSize * 0.82, py + cellSize * 0.5);
+        context.moveTo(px + cellSize * 0.5, py + cellSize * 0.18);
+        context.lineTo(px + cellSize * 0.5, py + cellSize * 0.82);
+        context.stroke();
+      }
       if (factories > 0) {
         context.fillStyle = AGENT_COLORS.Producer;
         context.fillRect(px + cellSize * 0.56, py + cellSize * 0.18, cellSize * 0.24, cellSize * 0.52);
+      }
+      if (powerPlant > 0) {
+        context.fillStyle = "#fde047";
+        context.beginPath();
+        context.moveTo(px + cellSize * 0.22, py + cellSize * 0.22);
+        context.lineTo(px + cellSize * 0.48, py + cellSize * 0.22);
+        context.lineTo(px + cellSize * 0.36, py + cellSize * 0.48);
+        context.lineTo(px + cellSize * 0.58, py + cellSize * 0.48);
+        context.lineTo(px + cellSize * 0.28, py + cellSize * 0.82);
+        context.lineTo(px + cellSize * 0.38, py + cellSize * 0.56);
+        context.lineTo(px + cellSize * 0.18, py + cellSize * 0.56);
+        context.closePath();
+        context.fill();
       }
       if (logisticsWidgets > 0) {
         const badgeRadius = Math.max(6, Math.min(11, cellSize * 0.23));
@@ -165,6 +206,23 @@ export function drawSim(canvas: HTMLCanvasElement, state: SimState, hover: Coord
         context.font = `700 ${Math.max(8, Math.min(11, cellSize * 0.24))}px sans-serif`;
         context.fillText(String(logisticsWidgets), badgeX, badgeY + badgeRadius + 6);
       }
+      if (logisticsElectricity > 0) {
+        const badgeRadius = Math.max(5, Math.min(10, cellSize * 0.2));
+        const badgeX = px + badgeRadius + 3;
+        const badgeY = py + badgeRadius + 3;
+        context.fillStyle = "#60a5fa";
+        context.beginPath();
+        context.arc(badgeX, badgeY, badgeRadius, 0, Math.PI * 2);
+        context.fill();
+        context.fillStyle = "#08100f";
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.font = `700 ${Math.max(9, Math.min(13, cellSize * 0.28))}px sans-serif`;
+        context.fillText("E", badgeX, badgeY);
+        context.fillStyle = "#ffffff";
+        context.font = `700 ${Math.max(8, Math.min(11, cellSize * 0.24))}px sans-serif`;
+        context.fillText(String(logisticsElectricity), badgeX, badgeY + badgeRadius + 6);
+      }
       if (hover?.x === x && hover.y === y) {
         context.strokeStyle = "#ffffff";
         context.lineWidth = 2;
@@ -176,7 +234,7 @@ export function drawSim(canvas: HTMLCanvasElement, state: SimState, hover: Coord
   for (const transport of state.transports) {
     const path = transport.path.map(parseAccount).filter((coord): coord is Coord => coord !== null);
     if (path.length < 2) continue;
-    context.strokeStyle = "rgba(167,139,250,0.7)";
+    context.strokeStyle = transport.resource === "electricity" ? "rgba(96,165,250,0.75)" : "rgba(167,139,250,0.7)";
     context.lineWidth = Math.max(1, Math.min(5, transport.quantity));
     context.beginPath();
     context.moveTo(originX + (path[0].x + 0.5) * cellSize, originY + (path[0].y + 0.5) * cellSize);

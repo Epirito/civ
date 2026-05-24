@@ -18,8 +18,12 @@ function averageTradePrice(trades: Trade[]) {
   return quantity === 0 ? null : { quantity, price: value / quantity };
 }
 
-function orderSummary(orders: Order[], side: Side) {
-  const matchingOrders = orders.filter((order) => order.side === side);
+function averageTradePriceForResource(trades: Trade[], resource: "widget" | "electricity") {
+  return averageTradePrice(trades.filter((trade) => trade.resource === resource));
+}
+
+function orderSummary(orders: Order[], side: Side, resource: "widget" | "electricity") {
+  const matchingOrders = orders.filter((order) => order.side === side && order.resource === resource);
   let quantity = 0;
   let value = 0;
   for (const order of matchingOrders) {
@@ -120,13 +124,17 @@ export function EconomicSimPage() {
         const [hoverX, hoverY] = hoverAccount.split(",").map(Number);
         const cellTrades = state.trades.filter((trade) => trade.x === hoverX && trade.y === hoverY);
         const cellOrders = state.orders.filter((order) => order.account === hoverAccount);
-        const averageTrade = averageTradePrice(cellTrades);
-        const lastBid = orderSummary(cellOrders, "bid");
-        const lastAsk = orderSummary(cellOrders, "ask");
+        const averageWidgetTrade = averageTradePriceForResource(cellTrades, "widget");
+        const averageElectricityTrade = averageTradePriceForResource(cellTrades, "electricity");
+        const lastBid = orderSummary(cellOrders, "bid", "widget");
+        const lastAsk = orderSummary(cellOrders, "ask", "widget");
+        const lastElectricityBid = orderSummary(cellOrders, "bid", "electricity");
+        const lastElectricityAsk = orderSummary(cellOrders, "ask", "electricity");
         const modeledValue = modeledValueByCell.get(hoverAccount);
         const road = getBalance(state.ledger, "Common", hoverAccount, "road");
         const congestion = getBalance(state.ledger, "Common", hoverAccount, "congestion");
         const lastCongestion = getBalance(state.ledger, "Common", hoverAccount, "last-congestion");
+        const powerLine = getBalance(state.ledger, "Common", hoverAccount, "power-line");
         const modeledValueText =
           modeledValue === undefined
             ? null
@@ -136,15 +144,29 @@ export function EconomicSimPage() {
         return [
           ...AGENTS.map((agent) => {
             const widgets = getBalance(state.ledger, agent, hoverAccount, "widget");
+            const electricity = getBalance(state.ledger, agent, hoverAccount, "electricity");
             const factories = getBalance(state.ledger, agent, hoverAccount, "factory");
             const population = getBalance(state.ledger, agent, hoverAccount, "population");
-            return `${agent}: ${widgets} widget, ${factories} factory, ${population} population`;
+            return `${agent}: ${widgets} widget, ${electricity} electricity, ${factories} factory, ${population} population`;
           }),
           ...(modeledValueText ? [modeledValueText] : []),
-          `Road: ${road}, congestion: ${congestion}, last: ${lastCongestion}`,
-          ...(lastBid ? [`Last bid avg: ${lastBid.price.toFixed(1)} over ${lastBid.quantity}`] : []),
-          ...(lastAsk ? [`Last ask avg: ${lastAsk.price.toFixed(1)} over ${lastAsk.quantity}`] : []),
-          ...(averageTrade ? [`Last trade avg: ${averageTrade.price.toFixed(1)} over ${averageTrade.quantity}`] : []),
+          `Road: ${road}, congestion: ${congestion}, last: ${lastCongestion}, power line: ${powerLine}`,
+          ...(lastBid ? [`Widget bid avg: ${lastBid.price.toFixed(1)} over ${lastBid.quantity}`] : []),
+          ...(lastAsk ? [`Widget ask avg: ${lastAsk.price.toFixed(1)} over ${lastAsk.quantity}`] : []),
+          ...(lastElectricityBid
+            ? [`Electricity bid avg: ${lastElectricityBid.price.toFixed(1)} over ${lastElectricityBid.quantity}`]
+            : []),
+          ...(lastElectricityAsk
+            ? [`Electricity ask avg: ${lastElectricityAsk.price.toFixed(1)} over ${lastElectricityAsk.quantity}`]
+            : []),
+          ...(averageWidgetTrade
+            ? [`Widget trade avg: ${averageWidgetTrade.price.toFixed(1)} over ${averageWidgetTrade.quantity}`]
+            : []),
+          ...(averageElectricityTrade
+            ? [
+                `Electricity trade avg: ${averageElectricityTrade.price.toFixed(1)} over ${averageElectricityTrade.quantity}`,
+              ]
+            : []),
         ];
       })()
     : ["Hover a cell to inspect balances"];
@@ -232,9 +254,12 @@ export function EconomicSimPage() {
               <span />
               <span>Money</span>
               <span>Widgets</span>
+              <span>Elec</span>
               <span>Factories</span>
               <span>Pop</span>
               <span>Road</span>
+              <span>Line</span>
+              <span>Plant</span>
               <span>Cong</span>
               <span>Last</span>
             </div>
@@ -246,9 +271,12 @@ export function EconomicSimPage() {
                 </span>
                 <span>{row.money}</span>
                 <span>{row.widget}</span>
+                <span>{row.electricity}</span>
                 <span>{row.factory}</span>
                 <span>{row.population}</span>
                 <span>{row.road}</span>
+                <span>{row["power-line"]}</span>
+                <span>{row["power-plant"]}</span>
                 <span>{row.congestion}</span>
                 <span>{row["last-congestion"]}</span>
               </div>

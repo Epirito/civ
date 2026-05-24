@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clearMarket, transportUnitCost } from "./engine";
+import { clearMarket, electricityDeliveryFactor, electricityTransportLoss, transportUnitCost } from "./engine";
 import { MONEY_ACCOUNT } from "./constants";
 import { accountOf, addBalance, makeLedger } from "./ledger";
 import type { Account, Ledger, Order } from "./types";
@@ -37,7 +37,7 @@ describe("clearMarket", () => {
       order({ id: 2, agent: "Producer", side: "ask", price: 8, quantity: 2 }),
     ]);
 
-    expect(result.trades).toEqual([{ x: 1, y: 1, buyer: "Consumer-1,1", seller: "Producer", quantity: 2, price: 9 }]);
+    expect(result.trades).toEqual([{ x: 1, y: 1, resource: "widget", buyer: "Consumer-1,1", seller: "Producer", quantity: 2, price: 9 }]);
     expect(balance(ledger, "Consumer-1,1", MONEY_ACCOUNT, "money")).toBe(82);
     expect(balance(ledger, "Consumer-1,1", cell, "widget")).toBe(2);
     expect(balance(ledger, "Producer", MONEY_ACCOUNT, "money")).toBe(18);
@@ -86,7 +86,7 @@ describe("clearMarket", () => {
       order({ id: 2, agent: "Producer", side: "ask", price: 6, quantity: 3 }),
     ]);
 
-    expect(result.trades).toEqual([{ x: 1, y: 1, buyer: "Consumer-1,1", seller: "Producer", quantity: 1, price: 8 }]);
+    expect(result.trades).toEqual([{ x: 1, y: 1, resource: "widget", buyer: "Consumer-1,1", seller: "Producer", quantity: 1, price: 8 }]);
     expect(result.orderResults).toEqual([
       expect.objectContaining({ id: 1, filled: 1, unfilled: 0 }),
       expect.objectContaining({ id: 2, filled: 1, unfilled: 2 }),
@@ -136,5 +136,27 @@ describe("transportUnitCost", () => {
 
     expect(transportUnitCost(ledger, accountOf(0, 0), accountOf(1, 0))).toBe(1);
     expect(transportUnitCost(ledger, accountOf(1, 0), accountOf(0, 0))).toBe(1);
+  });
+});
+
+describe("electricity transport", () => {
+  it("requires power lines and computes delivery loss with floats before integer rounding", () => {
+    const ledger = makeLedger();
+    addBalance(ledger, "Common", accountOf(0, 0), "power-line", 1);
+    addBalance(ledger, "Common", accountOf(1, 0), "power-line", 1);
+    addBalance(ledger, "Common", accountOf(2, 0), "power-line", 1);
+
+    const factor = electricityDeliveryFactor(ledger, accountOf(0, 0), accountOf(2, 0));
+
+    expect(factor).toBeCloseTo((19 / 20) ** 2);
+    expect(electricityTransportLoss(20, factor ?? 0)).toBe(2);
+  });
+
+  it("does not allow electricity movement through cells without power lines", () => {
+    const ledger = makeLedger();
+    addBalance(ledger, "Common", accountOf(0, 0), "power-line", 1);
+    addBalance(ledger, "Common", accountOf(2, 0), "power-line", 1);
+
+    expect(electricityDeliveryFactor(ledger, accountOf(0, 0), accountOf(2, 0))).toBeNull();
   });
 });
