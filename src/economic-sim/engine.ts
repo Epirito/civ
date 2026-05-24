@@ -30,6 +30,54 @@ type TransportQuoteCache = Map<string, TransportQuote>;
 type ElectricityTransportQuoteCache = Map<string, ElectricityTransportQuote | null>;
 const ELECTRICITY_LINE_EFFICIENCY = 19 / 20;
 
+class MinPriorityQueue<T> {
+  private readonly heap: Array<{ item: T; priority: number }> = [];
+
+  get size() {
+    return this.heap.length;
+  }
+
+  push(item: T, priority: number) {
+    this.heap.push({ item, priority });
+    this.bubbleUp(this.heap.length - 1);
+  }
+
+  pop() {
+    const min = this.heap[0];
+    const last = this.heap.pop();
+    if (!last || !min) return undefined;
+    if (this.heap.length > 0) {
+      this.heap[0] = last;
+      this.bubbleDown(0);
+    }
+    return min;
+  }
+
+  private bubbleUp(index: number) {
+    let current = index;
+    while (current > 0) {
+      const parent = Math.floor((current - 1) / 2);
+      if (this.heap[parent].priority <= this.heap[current].priority) break;
+      [this.heap[parent], this.heap[current]] = [this.heap[current], this.heap[parent]];
+      current = parent;
+    }
+  }
+
+  private bubbleDown(index: number) {
+    let current = index;
+    while (true) {
+      const left = current * 2 + 1;
+      const right = left + 1;
+      let smallest = current;
+      if (left < this.heap.length && this.heap[left].priority < this.heap[smallest].priority) smallest = left;
+      if (right < this.heap.length && this.heap[right].priority < this.heap[smallest].priority) smallest = right;
+      if (smallest === current) break;
+      [this.heap[current], this.heap[smallest]] = [this.heap[smallest], this.heap[current]];
+      current = smallest;
+    }
+  }
+}
+
 function sortByValueAsc<T>(items: T[], value: (item: T) => number, value2?: (item: T) => number) {
   return [...items].sort((a, b) => {
     const primary = value(a) - value(b);
@@ -183,23 +231,24 @@ export function transportPath(ledger: Ledger, from: Account, to: Account) {
 
   const best = new Map<Account, number>([[from, 0]]);
   const previous = new Map<Account, Account>();
-  const unsettled: Account[] = [from];
+  const unsettled = new MinPriorityQueue<Account>();
+  unsettled.push(from, 0);
 
-  while (unsettled.length > 0) {
-    unsettled.sort((a, b) => (best.get(a) ?? Number.POSITIVE_INFINITY) - (best.get(b) ?? Number.POSITIVE_INFINITY));
-    const current = unsettled.shift();
-    if (!current) break;
+  while (unsettled.size > 0) {
+    const next = unsettled.pop();
+    if (!next) break;
+    const { item: current, priority: currentCost } = next;
+    if (currentCost > (best.get(current) ?? Number.POSITIVE_INFINITY)) continue;
     if (current === to) break;
     const currentCoord = parseAccount(current);
     if (!currentCoord) continue;
-    const currentCost = best.get(current) ?? Number.POSITIVE_INFINITY;
     for (const neighbor of neighbors(currentCoord)) {
       const account = `${neighbor.x},${neighbor.y}` as Account;
       const nextCost = currentCost + localTransportUnitCost(ledger, account);
       if (nextCost >= (best.get(account) ?? Number.POSITIVE_INFINITY)) continue;
       best.set(account, nextCost);
       previous.set(account, current);
-      if (!unsettled.includes(account)) unsettled.push(account);
+      unsettled.push(account, nextCost);
     }
   }
 

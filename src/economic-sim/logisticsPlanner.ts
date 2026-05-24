@@ -291,7 +291,7 @@ export class LogisticsMarketPlanner {
     virtualBuySupply: Map<Account, number>,
   ) {
     const globalMaxPrice = maxObservedMapPrice(lastTrades);
-    const candidates: Candidate[] = [];
+    let best: Candidate | undefined;
 
     // Already-owned widgets can be transported now, then listed for sale in
     // this same policy run. If the source is also a destination market, moving
@@ -307,13 +307,14 @@ export class LogisticsMarketPlanner {
         if (source === destination.account) continue;
         const cashCost = transportTotalCost(1, api.transportUnitCost(source, destination.account));
         if (cashCost > api.balance(MONEY_ACCOUNT, "money")) continue;
-        candidates.push({
+        const candidate: Candidate = {
           kind: "move",
           source,
           destination,
           cashCost: cashCost + opportunityCost,
           value: destination.model.expectedSalePriceOfMarginalInventory(destination.virtualInventory, globalMaxPrice),
-        });
+        };
+        if (!best || candidate.value - candidate.cashCost > best.value - best.cashCost) best = candidate;
       }
     }
 
@@ -327,20 +328,21 @@ export class LogisticsMarketPlanner {
         const transportCost = transportTotalCost(1, api.transportUnitCost(source, destination.account));
         const cashCost = checkedAdd(sourceBidPrice, transportCost, "buy and move cost");
         if (sourceBidPrice > api.balance(MONEY_ACCOUNT, "money")) continue;
-        candidates.push({
+        const candidate: Candidate = {
           kind: "buy",
           source,
           price: sourceBidPrice,
           destination,
           cashCost,
           value: destination.model.expectedSalePriceOfMarginalInventory(destination.virtualInventory, globalMaxPrice),
-        });
+        };
+        if (!best || candidate.value - candidate.cashCost > best.value - best.cashCost) best = candidate;
       }
     }
 
     // Choose the chunk with the largest modeled surplus. The caller applies one
     // chunk, updates virtual inventory, and asks again for diminishing returns.
-    return sortByValueDesc(candidates, (candidate) => candidate.value - candidate.cashCost)[0];
+    return best;
   }
 
   private sourceBidPrice(lastTrades: Trade[], source: Account) {
