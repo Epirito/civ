@@ -379,9 +379,6 @@ function createAgentApi(
         addBalance(ledger, "Common", account, "congestion", quantity);
       }
       transports.push({ agent, from, to, resource, quantity, cost: totalCost, path });
-      if (agent.startsWith("Logistics-")) {
-        console.log("Logistics transported widgets", { from, to, quantity, cost: totalCost });
-      }
     },
     requestElectricityTransportGross: (from, to, grossQuantity) => {
       assertSafeAmount(grossQuantity, "gross electricity transport quantity");

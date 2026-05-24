@@ -24,7 +24,15 @@ export function consumerAgentFor(x: number, y: number): ConsumerAgent {
   return `Consumer-${x},${y}`;
 }
 
-export const CONSUMER_AGENTS: ConsumerAgent[] = POPULATION_CELLS.map((cell) => consumerAgentFor(cell.x, cell.y));
+export const PACKED_POPULATION_CELLS: Array<Coord & { amount: number }> = Array.from({ length: GRID_HEIGHT }, (_, y) =>
+  Array.from({ length: GRID_WIDTH }, (_unused, x) => ({ x, y, amount: 1 + ((x * 3 + y * 5) % 4) })),
+).flat();
+
+export const CONSUMER_AGENTS: ConsumerAgent[] = [
+  ...new Set(
+    [...POPULATION_CELLS, ...PACKED_POPULATION_CELLS].map((cell) => consumerAgentFor(cell.x, cell.y)),
+  ),
+];
 export const LOGISTICS_AGENTS: LogisticsAgent[] = ["Logistics-0", "Logistics-1"];
 export const ELECTRICITY_LOGISTICS_AGENT: ElectricityLogisticsAgent = "ElectricityLogistics";
 

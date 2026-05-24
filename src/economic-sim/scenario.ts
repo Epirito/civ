@@ -4,6 +4,7 @@ import {
   GRID_WIDTH,
   LOGISTICS_AGENTS,
   MONEY_ACCOUNT,
+  PACKED_POPULATION_CELLS,
   POPULATION_CELLS,
   consumerAgentFor,
 } from "./constants";
@@ -93,3 +94,52 @@ export function createInitialState(): SimState {
     note: "Initial endowments loaded",
   };
 }
+
+export function createPackedState(): SimState {
+  const ledger = makeLedger();
+
+  addBalance(ledger, "Producer", MONEY_ACCOUNT, "money", 2400);
+  for (const logisticsAgent of LOGISTICS_AGENTS) {
+    addBalance(ledger, logisticsAgent, MONEY_ACCOUNT, "money", 2400);
+  }
+  addBalance(ledger, ELECTRICITY_LOGISTICS_AGENT, MONEY_ACCOUNT, "money", 2400);
+
+  for (let y = 0; y < GRID_HEIGHT; y += 1) {
+    for (let x = 0; x < GRID_WIDTH; x += 1) {
+      const account = accountOf(x, y);
+      addBalance(ledger, "Common", account, "road", 2 + ((x + y) % 3));
+      addBalance(ledger, "Common", account, "power-line", 1);
+      addBalance(ledger, "Producer", account, "widget", 4 + ((x * 2 + y) % 5));
+      addBalance(ledger, "Producer", account, "electricity", 6 + ((x + y * 2) % 7));
+      if ((x + y) % 3 === 0) addBalance(ledger, "Producer", account, "factory", 1);
+      if ((x * 2 + y) % 11 === 0) addBalance(ledger, "Producer", account, "power-plant", 1);
+      if ((x + y) % 5 === 0) addBalance(ledger, LOGISTICS_AGENTS[(x + y) % LOGISTICS_AGENTS.length], account, "widget", 1);
+      if ((x * 3 + y) % 7 === 0) addBalance(ledger, ELECTRICITY_LOGISTICS_AGENT, account, "electricity", 4);
+    }
+  }
+
+  for (const population of PACKED_POPULATION_CELLS) {
+    const account = accountOf(population.x, population.y);
+    const consumer = consumerAgentFor(population.x, population.y);
+    addBalance(ledger, consumer, account, "population", population.amount);
+    addBalance(ledger, consumer, MONEY_ACCOUNT, "money", population.amount * 24);
+  }
+
+  return {
+    turn: 0,
+    nextOrderId: 1,
+    ledger,
+    orders: [],
+    lastOrderResults: [],
+    trades: [],
+    transports: [],
+    note: "Packed stress scenario loaded",
+  };
+}
+
+export const SCENARIOS = [
+  { id: "baseline", label: "Baseline", createState: createInitialState },
+  { id: "packed", label: "Packed", createState: createPackedState },
+] as const;
+
+export type ScenarioId = (typeof SCENARIOS)[number]["id"];

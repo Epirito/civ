@@ -5,7 +5,7 @@ import { AGENTS, GRID_HEIGHT, GRID_WIDTH, LOGISTICS_AGENTS, RESOURCES, agentColo
 import { stepSimulation } from "./engine";
 import { accountOf, cellsWith, getBalance, totalAgentResource } from "./ledger";
 import { createLogisticsMarketPlanner } from "./logisticsPlanner";
-import { createInitialState } from "./scenario";
+import { SCENARIOS, type ScenarioId } from "./scenario";
 import type { Coord, Order, Resource, Side, Trade } from "./types";
 
 function averageTradePrice(trades: Trade[]) {
@@ -38,6 +38,11 @@ const visualizationLogisticsPlanner = createLogisticsMarketPlanner();
 const INITIAL_VIEWPORT: SimViewport = { scale: 1, offsetX: 0, offsetY: 0 };
 const MIN_ZOOM = 0.6;
 const MAX_ZOOM = 4;
+const DEFAULT_SCENARIO = SCENARIOS[0];
+
+function hasAnyResource(totals: Record<Resource, number>) {
+  return RESOURCES.some((resource) => totals[resource] > 0);
+}
 
 function clampZoom(scale: number) {
   return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, scale));
@@ -45,7 +50,8 @@ function clampZoom(scale: number) {
 
 export function EconomicSimPage() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [state, setState] = useState(createInitialState);
+  const [scenarioId, setScenarioId] = useState<ScenarioId>(DEFAULT_SCENARIO.id);
+  const [state, setState] = useState(DEFAULT_SCENARIO.createState);
   const [running, setRunning] = useState(true);
   const [fastMode, setFastMode] = useState(false);
   const [hover, setHover] = useState<Coord | null>(null);
@@ -53,6 +59,15 @@ export function EconomicSimPage() {
   const [showRoadHeatmap, setShowRoadHeatmap] = useState(false);
   const [viewport, setViewport] = useState<SimViewport>(INITIAL_VIEWPORT);
   const panRef = useRef<{ pointerId: number; x: number; y: number; viewport: SimViewport } | null>(null);
+  const scenario = SCENARIOS.find((entry) => entry.id === scenarioId) ?? DEFAULT_SCENARIO;
+
+  const selectScenario = (nextScenarioId: ScenarioId) => {
+    const nextScenario = SCENARIOS.find((entry) => entry.id === nextScenarioId) ?? DEFAULT_SCENARIO;
+    setScenarioId(nextScenario.id);
+    setHover(null);
+    setViewport(INITIAL_VIEWPORT);
+    setState(nextScenario.createState());
+  };
 
   const modeledValueByCell = useMemo(
     () =>
@@ -114,9 +129,10 @@ export function EconomicSimPage() {
         totals: Object.fromEntries(
           RESOURCES.map((resource) => [resource, totalAgentResource(state.ledger, agent, resource)]),
         ) as Record<Resource, number>,
-      })),
+      })).filter(({ totals }) => hasAnyResource(totals)),
     [state.ledger],
   );
+  const visibleAgents = useMemo(() => agentTotals.map(({ agent }) => agent), [agentTotals]);
 
   const hoverAccount = hover ? accountOf(hover.x, hover.y) : null;
   const hoverLines = hoverAccount
@@ -142,7 +158,7 @@ export function EconomicSimPage() {
               ? "Modeled widget value: unknown"
               : `Modeled widget value: ${modeledValue.toFixed(1)}`;
         return [
-          ...AGENTS.map((agent) => {
+          ...visibleAgents.map((agent) => {
             const widgets = getBalance(state.ledger, agent, hoverAccount, "widget");
             const electricity = getBalance(state.ledger, agent, hoverAccount, "electricity");
             const factories = getBalance(state.ledger, agent, hoverAccount, "factory");
@@ -185,6 +201,23 @@ export function EconomicSimPage() {
         </div>
 
         <section>
+          <h2>Scenario</h2>
+          <div className="scenario-tabs" role="tablist" aria-label="Economic sim scenario">
+            {SCENARIOS.map((entry) => (
+              <button
+                key={entry.id}
+                className={entry.id === scenarioId ? "active" : undefined}
+                onClick={() => selectScenario(entry.id)}
+                role="tab"
+                aria-selected={entry.id === scenarioId}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section>
           <h2>Controls</h2>
           <div className="controls sim-controls">
             <button onClick={() => setRunning((value) => !value)} title={running ? "Pause" : "Run"}>
@@ -193,7 +226,7 @@ export function EconomicSimPage() {
             <button onClick={() => setState(stepSimulation)} title="Step one turn">
               <StepForward size={18} />
             </button>
-            <button onClick={() => setState(createInitialState())} title="Reset simulation">
+            <button onClick={() => setState(scenario.createState())} title="Reset simulation">
               <RotateCcw size={18} />
             </button>
             <button
@@ -238,7 +271,7 @@ export function EconomicSimPage() {
         <section>
           <h2>Agents</h2>
           <div className="sim-legend">
-            {AGENTS.map((agent) => (
+            {visibleAgents.map((agent) => (
               <div key={agent}>
                 <span className="swatch" style={{ background: agentColor(agent) }} />
                 <span>{agent}</span>
