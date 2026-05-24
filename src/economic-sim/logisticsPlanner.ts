@@ -45,10 +45,6 @@ type Candidate =
       cashCost: number;
     };
 
-function sortByValueDesc<T>(items: T[], value: (item: T) => number) {
-  return [...items].sort((a, b) => value(b) - value(a));
-}
-
 function accountCoord(account: Account) {
   const coord = parseAccount(account);
   if (!coord) throw new Error(`Expected physical account, got ${account || "abstract"}`);
@@ -90,6 +86,10 @@ function bidResults(results: OrderResult[], account: Account, resource: MarketRe
 
 function isLogisticsAgent(agent: string) {
   return agent.startsWith("Logistics-");
+}
+
+function uniqueCellsByAccount(cells: CellBalance[]) {
+  return [...new Map(cells.map((cell) => [cell.account, cell])).values()];
 }
 
 /**
@@ -353,41 +353,66 @@ export class LogisticsMarketPlanner {
     const price = observedPrice(lastTrades, source, "widget") ?? BOOTSTRAP_FACTORY_BID_PRICE;
     return Math.max(1, Math.min(MAX_ORDER_PRICE, Math.round(price)));
   }
-
 }
 
 export class ElectricityLogisticsPlanner {
   run(api: AgentApi, { publicLastOrderResults }: AgentPolicyContext) {
-    const destinations = [
+    const destinations = uniqueCellsByAccount([
       ...api.observeCells("Producer", "factory"),
       ...CONSUMER_AGENTS.flatMap((agent) => api.observeCells(agent, "population")),
-    ];
+    ]);
     if (destinations.length === 0) return;
 
-    const demandPrice = (account: Account) => {
-      const bids = bidResults(publicLastOrderResults, account, "electricity");
-      if (bids.length === 0) return 6;
-      const quantity = bids.reduce((sum, bid) => sum + bid.quantity, 0);
-      const value = bids.reduce((sum, bid) => sum + checkedMul(bid.quantity, bid.price, "electricity bid value"), 0);
-      return quantity === 0 ? 6 : Math.max(1, Math.round(value / quantity));
-    };
+    const demandPriceByAccount = new Map(
+      destinations.map((destination) => {
+        const account = destination.account;
+        const bids = bidResults(publicLastOrderResults, account, "electricity");
+        if (bids.length === 0) return [account, 6] as const;
+        const quantity = bids.reduce((sum, bid) => sum + bid.quantity, 0);
+        const value = bids.reduce((sum, bid) => sum + checkedMul(bid.quantity, bid.price, "electricity bid value"), 0);
+        return [account, quantity === 0 ? 6 : Math.max(1, Math.round(value / quantity))] as const;
+      }),
+    );
+
+    const demandPrice = (account: Account) => demandPriceByAccount.get(account) ?? 6;
 
     for (const source of api.cellsWith("electricity")) {
       let remaining = source.amount;
+      const reachableDestinations = destinations
+        .filter((destination) => destination.account !== source.account)
+        .map((destination) => ({
+          destination,
+          factor: api.electricityDeliveryFactor(source.account, destination.account),
+          demandPrice: demandPrice(destination.account),
+        }))
+        .filter(
+          (candidate): candidate is { destination: CellBalance; factor: number; demandPrice: number } =>
+            candidate.factor !== null,
+        );
       while (remaining > 0) {
         const gross = Math.min(ELECTRICITY_GROSS_CHUNK, remaining);
-        const candidate = sortByValueDesc(
-          destinations
-            .filter((destination) => destination.account !== source.account)
-            .map((destination) => {
-              const factor = api.electricityDeliveryFactor(source.account, destination.account);
-              const loss = factor === null ? gross : electricityTransportLoss(gross, factor);
-              const delivered = gross - loss;
-              return { destination, factor, gross, delivered, value: delivered * demandPrice(destination.account) };
-            })
-            .filter((candidate) => candidate.factor !== null && candidate.delivered > 0),
-          (candidate) => candidate.value,
-        )[0];
+        let candidate:
+          | {
+              destination: CellBalance;
+              gross: number;
+              delivered: number;
+              value: number;
+            }
+          | undefined;
+        for (const reachableDestination of reachableDestinations) {
+          const loss = electricityTransportLoss(gross, reachableDestination.factor);
+          const delivered = gross - loss;
+          if (delivered <= 0) continue;
+          const value = delivered * reachableDestination.demandPrice;
+          if (!candidate || value > candidate.value) {
+            candidate = {
+              destination: reachableDestination.destination,
+              gross,
+              delivered,
+              value,
+            };
+          }
+        }
         if (!candidate || candidate.value <= 0) break;
         api.requestElectricityTransportGross(source.account, candidate.destination.account, candidate.gross);
         remaining -= candidate.gross;
@@ -400,15 +425,14 @@ export class ElectricityLogisticsPlanner {
     }
 
     for (const source of api.observeCells("Producer", "power-plant")) {
-      const reachableValue = Math.max(
-        0,
-        ...destinations.map((destination) => {
-          const factor = api.electricityDeliveryFactor(source.account, destination.account);
-          if (factor === null) return 0;
-          const delivered = ELECTRICITY_GROSS_CHUNK - electricityTransportLoss(ELECTRICITY_GROSS_CHUNK, factor);
-          return delivered * demandPrice(destination.account);
-        }),
-      );
+      let reachableValue = 0;
+      for (const destination of destinations) {
+        if (source.account === destination.account) continue;
+        const factor = api.electricityDeliveryFactor(source.account, destination.account);
+        if (factor === null) continue;
+        const delivered = ELECTRICITY_GROSS_CHUNK - electricityTransportLoss(ELECTRICITY_GROSS_CHUNK, factor);
+        reachableValue = Math.max(reachableValue, delivered * demandPrice(destination.account));
+      }
       if (reachableValue > ELECTRICITY_GROSS_CHUNK * 3) {
         const price = 3;
         const affordableQuantity = Math.floor(api.balance(MONEY_ACCOUNT, "money") / price);

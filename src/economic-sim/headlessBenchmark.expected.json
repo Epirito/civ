@@ -1,0 +1,55 @@
+{
+  "seed": 20260524,
+  "turns": 3,
+  "trajectoryHash": "a5ffed37575f4f1d",
+  "trajectory": [
+    {
+      "turn": 0,
+      "stateHash": "67fd8943db006e92",
+      "nextOrderId": 1,
+      "orders": 0,
+      "trades": 0,
+      "transports": 0
+    },
+    {
+      "turn": 1,
+      "stateHash": "3cf14786e8ca2027",
+      "nextOrderId": 152,
+      "orders": 151,
+      "trades": 34,
+      "transports": 11
+    },
+    {
+      "turn": 2,
+      "stateHash": "0a90eb6925c1af89",
+      "nextOrderId": 405,
+      "orders": 253,
+      "trades": 10,
+      "transports": 12
+    },
+    {
+      "turn": 3,
+      "stateHash": "b558c2eec4f40bf2",
+      "nextOrderId": 744,
+      "orders": 339,
+      "trades": 23,
+      "transports": 14
+    }
+  ],
+  "finalTurn": 3,
+  "nextOrderId": 744,
+  "trades": 23,
+  "transports": 14,
+  "totals": {
+    "money": 7248,
+    "widget": 478,
+    "factory": 19,
+    "population": 96,
+    "road": 165,
+    "congestion": 0,
+    "last-congestion": 0,
+    "electricity": 1999,
+    "power-line": 87,
+    "power-plant": 7
+  }
+}

@@ -26,11 +26,23 @@ type ElectricityTransportQuote = {
 };
 
 type TransportQuoteCache = Map<string, TransportQuote>;
-type ElectricityTransportQuoteCache = Map<string, ElectricityTransportQuote | null>;
+type ElectricityRouteTree = {
+  previous: Map<Account, Account>;
+  distance: Map<Account, number>;
+};
+type ElectricityTransportQuoteCache = {
+  quotes: Map<string, ElectricityTransportQuote | null>;
+  routeTrees: Map<Account, ElectricityRouteTree | null>;
+};
 const ELECTRICITY_LINE_EFFICIENCY = 19 / 20;
 
 export type SimulationOptions = {
   random?: () => number;
+  profiler?: SimulationProfiler;
+};
+
+export type SimulationProfiler = {
+  record: (name: string, durationMs: number) => void;
 };
 
 class MinPriorityQueue<T> {
@@ -310,6 +322,46 @@ export function electricityTransportPath(ledger: Ledger, from: Account, to: Acco
   return path;
 }
 
+function createElectricityRouteTree(ledger: Ledger, from: Account): ElectricityRouteTree | null {
+  const fromCoord = parseAccount(from);
+  if (!fromCoord) throw new Error("Electricity transport requires physical cell accounts");
+  if (!hasPowerLine(ledger, from)) return null;
+
+  const queue: Account[] = [from];
+  const seen = new Set<Account>([from]);
+  const previous = new Map<Account, Account>();
+  const distance = new Map<Account, number>([[from, 0]]);
+  let queueIndex = 0;
+
+  while (queueIndex < queue.length) {
+    const current = queue[queueIndex];
+    queueIndex += 1;
+    const coord = parseAccount(current);
+    if (!coord) continue;
+    for (const neighbor of neighbors(coord)) {
+      const account = `${neighbor.x},${neighbor.y}` as Account;
+      if (seen.has(account) || !hasPowerLine(ledger, account)) continue;
+      seen.add(account);
+      previous.set(account, current);
+      distance.set(account, (distance.get(current) ?? 0) + 1);
+      queue.push(account);
+    }
+  }
+
+  return { previous, distance };
+}
+
+function electricityTransportPathFromTree(tree: ElectricityRouteTree | null, from: Account, to: Account) {
+  if (!tree || !tree.distance.has(to)) return null;
+  const path = [to];
+  while (path[0] !== from) {
+    const before = tree.previous.get(path[0]);
+    if (!before) return null;
+    path.unshift(before);
+  }
+  return path;
+}
+
 function pathUnitCost(ledger: Ledger, path: Account[]) {
   return path.slice(1).reduce((sum, account) => sum + localTransportUnitCost(ledger, account), 0);
 }
@@ -323,11 +375,22 @@ function createTransportQuote(ledger: Ledger, from: Account, to: Account): Trans
   };
 }
 
-function transportQuote(ledger: Ledger, cache: TransportQuoteCache, from: Account, to: Account) {
+function transportQuote(
+  ledger: Ledger,
+  cache: TransportQuoteCache,
+  from: Account,
+  to: Account,
+  profiler?: SimulationProfiler,
+) {
   const key = transportPairKey(from, to);
   const cached = cache.get(key);
-  if (cached) return cached;
+  if (cached) {
+    profiler?.record("transportQuote.cacheHit", 0);
+    return cached;
+  }
+  const startedAt = profiler ? performance.now() : 0;
   const quote = createTransportQuote(ledger, from, to);
+  profiler?.record("transportQuote.create", performance.now() - startedAt);
   cache.set(key, quote);
   return quote;
 }
@@ -347,11 +410,30 @@ function electricityTransportQuote(
   cache: ElectricityTransportQuoteCache,
   from: Account,
   to: Account,
+  profiler?: SimulationProfiler,
 ) {
   const key = transportPairKey(from, to);
-  if (cache.has(key)) return cache.get(key) ?? null;
-  const quote = createElectricityTransportQuote(ledger, from, to);
-  cache.set(key, quote);
+  if (cache.quotes.has(key)) {
+    profiler?.record("electricityTransportQuote.cacheHit", 0);
+    return cache.quotes.get(key) ?? null;
+  }
+  const startedAt = profiler ? performance.now() : 0;
+  let tree = cache.routeTrees.get(from);
+  if (!cache.routeTrees.has(from)) {
+    const treeStartedAt = profiler ? performance.now() : 0;
+    tree = createElectricityRouteTree(ledger, from);
+    profiler?.record("electricityRouteTree.create", performance.now() - treeStartedAt);
+    cache.routeTrees.set(from, tree ?? null);
+  }
+  const path = electricityTransportPathFromTree(tree ?? null, from, to);
+  const quote = path
+    ? {
+        path,
+        deliveryFactor: ELECTRICITY_LINE_EFFICIENCY ** Math.max(0, path.length - 1),
+      }
+    : null;
+  profiler?.record("electricityTransportQuote.create", performance.now() - startedAt);
+  cache.quotes.set(key, quote);
   return quote;
 }
 
@@ -402,6 +484,7 @@ function createAgentApi(
   lastOrderResults: OrderResult[],
   getNextOrderId: () => number,
   setNextOrderId: (nextOrderId: number) => void,
+  profiler?: SimulationProfiler,
 ): AgentApi {
   const submitOrder = (order: Omit<Order, "agent" | "id" | "remaining">) => {
     setNextOrderId(placeOrder(ledger, orders, getNextOrderId(), { ...order, agent }));
@@ -418,13 +501,13 @@ function createAgentApi(
     placeAsk: (account, resource, price, quantity) => {
       submitOrder({ account, resource, side: "ask", price, quantity });
     },
-    transportUnitCost: (from, to) => transportQuote(ledger, transportQuoteCache, from, to).unitCost,
+    transportUnitCost: (from, to) => transportQuote(ledger, transportQuoteCache, from, to, profiler).unitCost,
     electricityDeliveryFactor: (from, to) =>
-      electricityTransportQuote(ledger, electricityTransportQuoteCache, from, to)?.deliveryFactor ?? null,
+      electricityTransportQuote(ledger, electricityTransportQuoteCache, from, to, profiler)?.deliveryFactor ?? null,
     requestTransport: (from, to, resource, requestedQuantity) => {
       assertSafeAmount(requestedQuantity, "transport quantity");
       if (requestedQuantity === 0 || from === to) return;
-      const quote = transportQuote(ledger, transportQuoteCache, from, to);
+      const quote = transportQuote(ledger, transportQuoteCache, from, to, profiler);
       const path = quotePathForDirection(quote, from, to);
       const unitCost = quote.unitCost;
       const money = getBalance(ledger, agent, MONEY_ACCOUNT, "money");
@@ -444,7 +527,7 @@ function createAgentApi(
     requestElectricityTransportGross: (from, to, grossQuantity) => {
       assertSafeAmount(grossQuantity, "gross electricity transport quantity");
       if (grossQuantity === 0 || from === to) return;
-      const quote = electricityTransportQuote(ledger, electricityTransportQuoteCache, from, to);
+      const quote = electricityTransportQuote(ledger, electricityTransportQuoteCache, from, to, profiler);
       if (!quote) return;
       const path = quotePathForDirection(quote, from, to);
       const available = getBalance(ledger, agent, from, "electricity");
@@ -502,14 +585,19 @@ function applyResourceGeneration(ledger: Ledger) {
 
 export function stepSimulation(state: SimState, options: SimulationOptions = {}): SimState {
   const random = options.random ?? Math.random;
+  const profiler = options.profiler;
+  const cloneStartedAt = profiler ? performance.now() : 0;
   const ledger = cloneLedger(state.ledger);
+  profiler?.record("step.cloneLedger", performance.now() - cloneStartedAt);
   const orders: Order[] = [];
   const transports: Transport[] = [];
   const transportQuoteCache: TransportQuoteCache = new Map();
-  const electricityTransportQuoteCache: ElectricityTransportQuoteCache = new Map();
+  const electricityTransportQuoteCache: ElectricityTransportQuoteCache = { quotes: new Map(), routeTrees: new Map() };
   let nextOrderId = state.nextOrderId;
 
+  const generationStartedAt = profiler ? performance.now() : 0;
   applyResourceGeneration(ledger);
+  profiler?.record("step.resourceGeneration", performance.now() - generationStartedAt);
 
   const apiFor = (agent: Agent) =>
     createAgentApi(
@@ -524,16 +612,21 @@ export function stepSimulation(state: SimState, options: SimulationOptions = {})
       (updatedNextOrderId) => {
         nextOrderId = updatedNextOrderId;
       },
+      profiler,
     );
 
   for (const policy of shuffled(AGENT_POLICIES, random)) {
+    const policyStartedAt = profiler ? performance.now() : 0;
     policy.run(apiFor(policy.agent), {
       lastTrades: state.trades,
       publicLastOrderResults: state.lastOrderResults,
     });
+    profiler?.record(`policy.${policy.agent}`, performance.now() - policyStartedAt);
   }
 
+  const marketStartedAt = profiler ? performance.now() : 0;
   const { trades, orderResults } = clearMarket(ledger, orders);
+  profiler?.record("step.clearMarket", performance.now() - marketStartedAt);
 
   return {
     turn: checkedAdd(state.turn, 1, "turn"),
