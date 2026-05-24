@@ -4,12 +4,18 @@ import {
   GRID_WIDTH,
   LOGISTICS_AGENTS,
   MONEY_ACCOUNT,
-  PACKED_POPULATION_CELLS,
   POPULATION_CELLS,
   consumerAgentFor,
 } from "./constants";
 import { accountOf, addBalance, makeLedger } from "./ledger";
 import type { Coord, SimState } from "./types";
+
+export const BENCHMARK_WIDTH = 12;
+export const BENCHMARK_HEIGHT = 8;
+
+export const BENCHMARK_CELLS: Coord[] = Array.from({ length: BENCHMARK_HEIGHT }, (_row, y) =>
+  Array.from({ length: BENCHMARK_WIDTH }, (_column, x) => ({ x, y })),
+).flat();
 
 function addPowerLineSegment(ledger: ReturnType<typeof makeLedger>, from: Coord, to: Coord) {
   const dx = Math.sign(to.x - from.x);
@@ -98,31 +104,45 @@ export function createInitialState(): SimState {
 export function createPackedState(): SimState {
   const ledger = makeLedger();
 
-  addBalance(ledger, "Producer", MONEY_ACCOUNT, "money", 2400);
+  addBalance(ledger, "Producer", MONEY_ACCOUNT, "money", 900);
   for (const logisticsAgent of LOGISTICS_AGENTS) {
-    addBalance(ledger, logisticsAgent, MONEY_ACCOUNT, "money", 2400);
+    addBalance(ledger, logisticsAgent, MONEY_ACCOUNT, "money", 900);
   }
-  addBalance(ledger, ELECTRICITY_LOGISTICS_AGENT, MONEY_ACCOUNT, "money", 2400);
+  addBalance(ledger, ELECTRICITY_LOGISTICS_AGENT, MONEY_ACCOUNT, "money", 900);
 
-  for (let y = 0; y < GRID_HEIGHT; y += 1) {
-    for (let x = 0; x < GRID_WIDTH; x += 1) {
-      const account = accountOf(x, y);
-      addBalance(ledger, "Common", account, "road", 2 + ((x + y) % 3));
-      addBalance(ledger, "Common", account, "power-line", 1);
-      addBalance(ledger, "Producer", account, "widget", 4 + ((x * 2 + y) % 5));
-      addBalance(ledger, "Producer", account, "electricity", 6 + ((x + y * 2) % 7));
-      if ((x + y) % 3 === 0) addBalance(ledger, "Producer", account, "factory", 1);
-      if ((x * 2 + y) % 11 === 0) addBalance(ledger, "Producer", account, "power-plant", 1);
-      if ((x + y) % 5 === 0) addBalance(ledger, LOGISTICS_AGENTS[(x + y) % LOGISTICS_AGENTS.length], account, "widget", 1);
-      if ((x * 3 + y) % 7 === 0) addBalance(ledger, ELECTRICITY_LOGISTICS_AGENT, account, "electricity", 4);
+  for (const { x, y } of BENCHMARK_CELLS) {
+    const account = accountOf(x, y);
+
+    if ((x + y * 2) % 7 !== 0) {
+      addBalance(ledger, "Common", account, "road", 1 + ((x + y) % 3));
     }
-  }
-
-  for (const population of PACKED_POPULATION_CELLS) {
-    const account = accountOf(population.x, population.y);
-    const consumer = consumerAgentFor(population.x, population.y);
-    addBalance(ledger, consumer, account, "population", population.amount);
-    addBalance(ledger, consumer, MONEY_ACCOUNT, "money", population.amount * 24);
+    if ((x * 3 + y) % 11 !== 0) {
+      addBalance(ledger, "Common", account, "power-line", 1);
+    }
+    if ((x + y) % 4 !== 0) {
+      addBalance(ledger, "Producer", account, "widget", 2 + ((x * 2 + y) % 4));
+    }
+    if ((x * 2 + y) % 5 !== 0) {
+      addBalance(ledger, "Producer", account, "electricity", 3 + ((x + y * 2) % 5));
+    }
+    if ((x + y) % 5 === 0) {
+      addBalance(ledger, "Producer", account, "factory", 1);
+    }
+    if ((x * 2 + y) % 13 === 0) {
+      addBalance(ledger, "Producer", account, "power-plant", 1);
+    }
+    if ((x + y) % 2 === 0) {
+      const consumer = consumerAgentFor(x, y);
+      const amount = 1 + ((x * 3 + y * 5) % 3);
+      addBalance(ledger, consumer, account, "population", amount);
+      addBalance(ledger, consumer, MONEY_ACCOUNT, "money", amount * 20);
+    }
+    if ((x + y) % 6 === 0) {
+      addBalance(ledger, LOGISTICS_AGENTS[(x + y) % LOGISTICS_AGENTS.length], account, "widget", 1);
+    }
+    if ((x * 3 + y) % 8 === 0) {
+      addBalance(ledger, ELECTRICITY_LOGISTICS_AGENT, account, "electricity", 4);
+    }
   }
 
   return {
@@ -133,9 +153,11 @@ export function createPackedState(): SimState {
     lastOrderResults: [],
     trades: [],
     transports: [],
-    note: "Packed stress scenario loaded",
+    note: "Packed benchmark scenario loaded",
   };
 }
+
+export const createBenchmarkState = createPackedState;
 
 export const SCENARIOS = [
   { id: "baseline", label: "Baseline", createState: createInitialState },

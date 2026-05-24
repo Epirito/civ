@@ -305,6 +305,8 @@ export class LogisticsMarketPlanner {
         : 0;
       for (const destination of destinations) {
         if (source === destination.account) continue;
+        const value = destination.model.expectedSalePriceOfMarginalInventory(destination.virtualInventory, globalMaxPrice);
+        if (value <= opportunityCost) continue;
         const cashCost = transportTotalCost(1, api.transportUnitCost(source, destination.account));
         if (cashCost > api.balance(MONEY_ACCOUNT, "money")) continue;
         const candidate: Candidate = {
@@ -312,7 +314,7 @@ export class LogisticsMarketPlanner {
           source,
           destination,
           cashCost: cashCost + opportunityCost,
-          value: destination.model.expectedSalePriceOfMarginalInventory(destination.virtualInventory, globalMaxPrice),
+          value,
         };
         if (!best || candidate.value - candidate.cashCost > best.value - best.cashCost) best = candidate;
       }
@@ -325,6 +327,8 @@ export class LogisticsMarketPlanner {
       if (quantity <= 0) continue;
       const sourceBidPrice = this.sourceBidPrice(lastTrades, source);
       for (const destination of destinations) {
+        const value = destination.model.expectedSalePriceOfMarginalInventory(destination.virtualInventory, globalMaxPrice);
+        if (value <= sourceBidPrice) continue;
         const transportCost = transportTotalCost(1, api.transportUnitCost(source, destination.account));
         const cashCost = checkedAdd(sourceBidPrice, transportCost, "buy and move cost");
         if (sourceBidPrice > api.balance(MONEY_ACCOUNT, "money")) continue;
@@ -334,7 +338,7 @@ export class LogisticsMarketPlanner {
           price: sourceBidPrice,
           destination,
           cashCost,
-          value: destination.model.expectedSalePriceOfMarginalInventory(destination.virtualInventory, globalMaxPrice),
+          value,
         };
         if (!best || candidate.value - candidate.cashCost > best.value - best.cashCost) best = candidate;
       }

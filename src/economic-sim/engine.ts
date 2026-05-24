@@ -1,4 +1,3 @@
-import shuffle from "lodash/shuffle";
 import { AGENTS, GRID_HEIGHT, GRID_WIDTH, MONEY_ACCOUNT } from "./constants";
 import { AGENT_POLICIES } from "./agents";
 import {
@@ -29,6 +28,10 @@ type ElectricityTransportQuote = {
 type TransportQuoteCache = Map<string, TransportQuote>;
 type ElectricityTransportQuoteCache = Map<string, ElectricityTransportQuote | null>;
 const ELECTRICITY_LINE_EFFICIENCY = 19 / 20;
+
+export type SimulationOptions = {
+  random?: () => number;
+};
 
 class MinPriorityQueue<T> {
   private readonly heap: Array<{ item: T; priority: number }> = [];
@@ -84,6 +87,15 @@ function sortByValueAsc<T>(items: T[], value: (item: T) => number, value2?: (ite
     if (primary !== 0 || !value2) return primary;
     return value2(a) - value2(b);
   });
+}
+
+function shuffled<T>(items: readonly T[], random: () => number) {
+  const result = [...items];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+  }
+  return result;
 }
 
 function midpointPrice(bidPrice: number, askPrice: number) {
@@ -488,7 +500,8 @@ function applyResourceGeneration(ledger: Ledger) {
   }
 }
 
-export function stepSimulation(state: SimState): SimState {
+export function stepSimulation(state: SimState, options: SimulationOptions = {}): SimState {
+  const random = options.random ?? Math.random;
   const ledger = cloneLedger(state.ledger);
   const orders: Order[] = [];
   const transports: Transport[] = [];
@@ -513,7 +526,7 @@ export function stepSimulation(state: SimState): SimState {
       },
     );
 
-  for (const policy of shuffle(AGENT_POLICIES)) {
+  for (const policy of shuffled(AGENT_POLICIES, random)) {
     policy.run(apiFor(policy.agent), {
       lastTrades: state.trades,
       publicLastOrderResults: state.lastOrderResults,

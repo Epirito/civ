@@ -63,6 +63,12 @@ const electricityLogisticsPlanners = new Map<
 >();
 const producerFactoryWidgetModels = new Map<Account, OptimisticLocalSaleValueModel>();
 
+export function resetAgentPolicyState() {
+  logisticsPlanners.clear();
+  electricityLogisticsPlanners.clear();
+  producerFactoryWidgetModels.clear();
+}
+
 function plannerFor(agent: LogisticsAgent) {
   const planner = logisticsPlanners.get(agent) ?? createLogisticsMarketPlanner();
   logisticsPlanners.set(agent, planner);
