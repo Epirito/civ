@@ -1,8 +1,21 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { hash, OCEAN, OCEAN_DARK, regionBlocks, TILE_STUDY_COLUMNS, TILE_STUDY_ROWS } from "./tileStudyData";
+import { hash, OCEAN, regionBlocks, TILE_STUDY_COLUMNS, TILE_STUDY_ROWS } from "./tileStudyData";
 
 type Vertex = [number, number, number];
+
+function randomUnit(x: number, y: number, salt = 0) {
+  return Math.abs(hash(x + salt * 19.17, y - salt * 23.41) % 1);
+}
+
+function tileColorVariant(hex: string, x: number, y: number) {
+  const color = new THREE.Color(hex);
+  const hueShift = (randomUnit(x, y, 1) - 0.5) * 0.002;
+  const saturationShift = (randomUnit(x, y, 2) - 0.5) * 0.014;
+  const lightnessShift = (randomUnit(x, y, 3) - 0.5) * 0.026;
+  color.offsetHSL(hueShift, saturationShift, lightnessShift);
+  return color;
+}
 
 function resizeRenderer(
   renderer: THREE.WebGLRenderer,
@@ -27,9 +40,9 @@ function makeTileGeometry() {
   // The tile is a low keycap: wide at the base, stepped inward at the
   // shoulder, then inward again for a smaller top face.
   const base = 0.49;
-  const shoulder = 0.44;
-  const top = 0.37;
-  const shoulderHeight = 0.055;
+  const shoulder = 0.43;
+  const top = 0.36;
+  const shoulderHeight = 0.075;
   const height = 0.18;
 
   const V = {
@@ -113,107 +126,39 @@ function makeTileGeometry() {
   return geometry;
 }
 
-function makeOceanTexture() {
-  const size = 512;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const context = canvas.getContext("2d");
-  if (!context) return null;
-
-  const gradient = context.createRadialGradient(size * 0.5, size * 0.5, 0, size * 0.5, size * 0.5, size * 0.8);
-  gradient.addColorStop(0, OCEAN);
-  gradient.addColorStop(0.58, OCEAN_DARK);
-  gradient.addColorStop(1, "#00091a");
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, size, size);
-
-  context.strokeStyle = "rgba(10, 49, 86, 0.45)";
-  context.lineWidth = 1;
-  for (let p = 0; p <= size; p += 24) {
-    context.beginPath();
-    context.moveTo(p, 0);
-    context.lineTo(p, size);
-    context.stroke();
-    context.beginPath();
-    context.moveTo(0, p);
-    context.lineTo(size, p);
-    context.stroke();
-  }
-
-  context.setLineDash([1, 7]);
-  context.strokeStyle = "rgba(10, 49, 86, 0.24)";
-  for (let p = 12; p <= size; p += 24) {
-    context.beginPath();
-    context.moveTo(p, 0);
-    context.lineTo(p, size);
-    context.stroke();
-    context.beginPath();
-    context.moveTo(0, p);
-    context.lineTo(size, p);
-    context.stroke();
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(6, 4);
-  return texture;
-}
-
-function saturatedTileColor(hex: string) {
-  const color = new THREE.Color(hex);
-  color.offsetHSL(0, 0.18, 0.025);
-  return color;
-}
-
-function addLights(scene: THREE.Scene) {
+function addLights(scene: THREE.Scene, keyIntensity: number) {
   //scene.add(new THREE.AmbientLight(0xfff7e4, 0.9));
  // scene.add(new THREE.HemisphereLight(0xcfe1ff, 0x07305c, 1.65));
 
-  const key = new THREE.DirectionalLight(0xffe0a2, 3.2);
-  key.position.set(-24, 36, -18);
+  const key = new THREE.DirectionalLight(0xffffff, keyIntensity);
+  key.position.set(-24, 12, -18);
   key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
-  key.shadow.radius = 9;
-  key.shadow.blurSamples = 20;
+  key.shadow.radius = 7;
+  key.shadow.blurSamples = 16;
   key.shadow.camera.left = -38;
   key.shadow.camera.right = 38;
   key.shadow.camera.top = 24;
   key.shadow.camera.bottom = -24;
   key.shadow.camera.near = 1;
   key.shadow.camera.far = 70;
-  scene.add(key);
-
-  //const coolRim = new THREE.DirectionalLight(0xfbfacd, 0.);
-  const coolRim = new THREE.DirectionalLight(0xfbfa00, 0.);
-  coolRim.position.set(-18, 18, -18);
-  //scene.add(coolRim);
-
-  /*
-  const oceanBounce = new THREE.PointLight(0x2798ff, 18, 58, 2.1);
-  oceanBounce.position.set(6, 6, 10);
-  scene.add(oceanBounce);
-
-  const warmGlow = new THREE.PointLight(0xffc04d, 12, 42, 2.2);
-  warmGlow.position.set(-16, 8, -3);
-  scene.add(warmGlow);*/
+  scene.add(key)
+  return key;
 }
 
-function buildScene(container: HTMLElement) {
+function buildScene(container: HTMLElement, keyIntensityRef: React.RefObject<number>) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.setClearColor(new THREE.Color(OCEAN_DARK), 1);
+  renderer.setClearColor(new THREE.Color(OCEAN), 1);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.VSMShadowMap;
-  renderer.toneMapping = THREE.ReinhardToneMapping;
-  renderer.toneMappingExposure = 1.75;
+  renderer.toneMapping = THREE.NoToneMapping;
+  renderer.toneMappingExposure = 1;
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(OCEAN_DARK);
-  scene.fog = new THREE.FogExp2(new THREE.Color(OCEAN_DARK), 0.004);
+  scene.background = new THREE.Color(OCEAN);
+  scene.fog = new THREE.FogExp2(new THREE.Color(OCEAN), 0.004);
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
   camera.position.set(0, 58, 9);
   camera.lookAt(0, 0, 0);
@@ -223,9 +168,7 @@ function buildScene(container: HTMLElement) {
   const plane = new THREE.Mesh(
     new THREE.PlaneGeometry(240, 160),
     new THREE.MeshLambertMaterial({
-      color: new THREE.Color(OCEAN_DARK),
-      emissive: new THREE.Color(OCEAN_DARK),
-      emissiveIntensity: 0.55,
+      color: new THREE.Color(OCEAN)
     }),
   );
   plane.rotation.x = -Math.PI / 2;
@@ -233,11 +176,11 @@ function buildScene(container: HTMLElement) {
   plane.receiveShadow = true;
   scene.add(plane);
 
-  addLights(scene);
+  const keyLight = addLights(scene, keyIntensityRef.current);
 
   const mouseLight = new THREE.PointLight(0xffd21f, 4.8, 11, 1.8);
   mouseLight.position.set(0, 3.2, 0);
-  scene.add(mouseLight);
+  //scene.add(mouseLight);
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -254,43 +197,44 @@ function buildScene(container: HTMLElement) {
 
   const tileGeometry = makeTileGeometry();
   const materials = new Map<string, THREE.MeshPhysicalMaterial[]>();
+  const tileSpacing = .99;
   const group = new THREE.Group();
   group.rotation.x = 0;
   group.rotation.z = 0;
   scene.add(group);
 
   for (const block of regionBlocks()) {
-    let materialSet = materials.get(block.color);
+    const variant = Math.floor(randomUnit(block.x, block.y, 4) * 5);
+    const materialKey = `${block.color}:${variant}`;
+    let materialSet = materials.get(materialKey);
     if (!materialSet) {
-      const tileColor = saturatedTileColor(block.color);
+      const tileColor = tileColorVariant(block.color, block.x + variant * 0.1, block.y - variant * 0.1);
       const bodyMaterial = new THREE.MeshPhysicalMaterial({
         color: tileColor,
         roughness: 0.5,
-        metalness: 0.03,
-        clearcoat: 0.22,
-        clearcoatRoughness: 0.34,
-        emissive: tileColor.clone().multiplyScalar(0.08),
-        emissiveIntensity: 0.28,
+        metalness: 0.7,
+        specularColor: new THREE.Color(0xffff00),
+        specularIntensity: 1,
+        emissive: tileColor.clone().multiplyScalar(0.02),
       });
       const northBevelMaterial = new THREE.MeshPhysicalMaterial({
         color: tileColor,
         roughness: 0.24,
         metalness: 0.04,
-        clearcoat: 0.72,
-        clearcoatRoughness: 0.18,
-        emissive: tileColor.clone().multiplyScalar(0.06),
-        emissiveIntensity: 0.2,
+        specularColor: new THREE.Color(0xffff00),
+        specularIntensity: 1,
+        emissive: tileColor.clone().multiplyScalar(0.015),
       });
       materialSet = [bodyMaterial, northBevelMaterial];
-      materials.set(block.color, materialSet);
+      materials.set(materialKey, materialSet);
     }
 
     const tile = new THREE.Mesh(tileGeometry, materialSet);
     const noise = hash(block.x, block.y) % 1;
     tile.position.set(
-      block.x - TILE_STUDY_COLUMNS / 2 + 0.5,
+      (block.x - TILE_STUDY_COLUMNS / 2 + 0.5) * tileSpacing,
       Math.max(0, noise * 0.03),
-      block.y - TILE_STUDY_ROWS / 2 + 0.5,
+      (block.y - TILE_STUDY_ROWS / 2 + 0.5) * tileSpacing,
     );
     tile.castShadow = true;
     tile.receiveShadow = true;
@@ -300,6 +244,7 @@ function buildScene(container: HTMLElement) {
   let frame = 0;
   const render = () => {
     frame = window.requestAnimationFrame(render);
+    keyLight.intensity = keyIntensityRef.current;
     camera.lookAt(cameraTarget);
     renderer.render(scene, camera);
   };
@@ -400,12 +345,33 @@ function buildScene(container: HTMLElement) {
 
 export function TileAesthetic3DPage() {
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const keyIntensityRef = useRef(9.);
+  const [keyIntensity, setKeyIntensity] = useState(keyIntensityRef.current);
 
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return undefined;
-    return buildScene(stage);
+    return buildScene(stage, keyIntensityRef);
   }, []);
 
-  return <main className="tile-study-app tile-study-3d" ref={stageRef} aria-label="3D economic tile aesthetic study" />;
+  return (
+    <main className="tile-study-app tile-study-3d" ref={stageRef} aria-label="3D economic tile aesthetic study">
+      <label className="tile-light-control">
+        <span>Light</span>
+        <input
+          type="range"
+          min="0"
+          max="30"
+          step="0.1"
+          value={keyIntensity}
+          onChange={(event) => {
+            const nextIntensity = Number(event.currentTarget.value);
+            keyIntensityRef.current = nextIntensity;
+            setKeyIntensity(nextIntensity);
+          }}
+        />
+        <output>{keyIntensity.toFixed(1)}</output>
+      </label>
+    </main>
+  );
 }
