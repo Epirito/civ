@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { fromArrayBuffer } from "geotiff";
-import { BarChart3, Eye, EyeOff, LocateFixed, Map, Minus, Plus, RotateCcw } from "lucide-react";
-import { EconomicSimPage } from "./economic-sim";
+import { BarChart3, Blocks, Box, Eye, EyeOff, LocateFixed, Map, Minus, Plus, RotateCcw } from "lucide-react";
+import { EconomicSimPage, TileAesthetic3DPage, TileAestheticPage } from "./economic-sim";
 import "./styles.css";
 
 type Position = [number, number];
@@ -461,11 +461,20 @@ function GeoMapPage() {
   );
 }
 
-function App() {
-  const [page, setPage] = useState<"map" | "sim">(() => (window.location.hash === "#sim" ? "sim" : "map"));
+type AppPage = "map" | "sim" | "tiles" | "tiles3d";
 
-  function showPage(nextPage: "map" | "sim") {
-    window.location.hash = nextPage === "sim" ? "sim" : "";
+function pageFromHash(): AppPage {
+  if (window.location.hash === "#sim") return "sim";
+  if (window.location.hash === "#tiles") return "tiles";
+  if (window.location.hash === "#tiles3d") return "tiles3d";
+  return "map";
+}
+
+function App() {
+  const [page, setPage] = useState<AppPage>(pageFromHash);
+
+  function showPage(nextPage: AppPage) {
+    window.location.hash = nextPage === "map" ? "" : nextPage;
     setPage(nextPage);
   }
 
@@ -480,8 +489,24 @@ function App() {
           <BarChart3 size={16} />
           <span>Economic sim</span>
         </button>
+        <button className={page === "tiles" ? "active" : ""} onClick={() => showPage("tiles")}>
+          <Blocks size={16} />
+          <span>Tile study</span>
+        </button>
+        <button className={page === "tiles3d" ? "active" : ""} onClick={() => showPage("tiles3d")}>
+          <Box size={16} />
+          <span>3D tiles</span>
+        </button>
       </nav>
-      {page === "map" ? <GeoMapPage /> : <EconomicSimPage />}
+      {page === "map" ? (
+        <GeoMapPage />
+      ) : page === "sim" ? (
+        <EconomicSimPage />
+      ) : page === "tiles" ? (
+        <TileAestheticPage />
+      ) : (
+        <TileAesthetic3DPage />
+      )}
     </>
   );
 }

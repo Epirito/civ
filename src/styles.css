@@ -379,6 +379,18 @@ h2 {
     #08100f;
 }
 
+.tile-study-app {
+  width: 100vw;
+  height: 100vh;
+  min-height: 520px;
+  overflow: hidden;
+  background: #001024;
+}
+
+.tile-study-3d canvas {
+  cursor: default;
+}
+
 canvas {
   display: block;
   width: 100%;
