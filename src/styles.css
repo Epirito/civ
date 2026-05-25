@@ -391,15 +391,13 @@ h2 {
   cursor: default;
 }
 
-.tile-light-control {
+.tile-controls {
   position: absolute;
   z-index: 11;
   right: 16px;
   bottom: 16px;
   display: grid;
-  grid-template-columns: auto minmax(120px, 190px) 42px;
-  align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 9px 11px;
   border: 1px solid rgba(232, 238, 243, 0.16);
   border-radius: 8px;
@@ -410,11 +408,18 @@ h2 {
   backdrop-filter: blur(10px);
 }
 
-.tile-light-control input {
+.tile-control-row {
+  display: grid;
+  grid-template-columns: 42px minmax(120px, 190px) 48px;
+  align-items: center;
+  gap: 10px;
+}
+
+.tile-control-row input {
   width: 100%;
 }
 
-.tile-light-control output {
+.tile-control-row output {
   color: #ffd45a;
   text-align: right;
 }

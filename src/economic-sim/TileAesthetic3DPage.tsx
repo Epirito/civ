@@ -3,6 +3,77 @@ import * as THREE from "three";
 import { hash, OCEAN, regionBlocks, TILE_STUDY_COLUMNS, TILE_STUDY_ROWS } from "./tileStudyData";
 
 type Vertex = [number, number, number];
+type OceanControls = {
+  hue: number;
+  saturation: number;
+  lightness: number;
+  emissive: number;
+};
+type StoredControls = {
+  keyIntensity: number;
+  topInset: number;
+  bodyRoughness: number;
+  bodyMetalness: number;
+  oceanControls: OceanControls;
+};
+type CityMarker = {
+  x: number;
+  y: number;
+  strength: number;
+};
+
+const STORAGE_KEY = "economic-sim.tile-aesthetic-3d.controls";
+
+const DEFAULT_OCEAN_CONTROLS: OceanControls = (() => {
+  const hsl = { h: 0, s: 0, l: 0 };
+  new THREE.Color(OCEAN).getHSL(hsl);
+  return {
+    hue: hsl.h,
+    saturation: hsl.s,
+    lightness: hsl.l,
+    emissive: 0,
+  };
+})();
+
+const DEFAULT_CONTROLS: StoredControls = {
+  keyIntensity: 9,
+  topInset: 0.13,
+  bodyRoughness: 0.5,
+  bodyMetalness: 0,
+  oceanControls: DEFAULT_OCEAN_CONTROLS,
+};
+
+function readStoredControls(): StoredControls {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_CONTROLS;
+    const parsed = JSON.parse(raw) as Partial<StoredControls>;
+    return {
+      keyIntensity: parsed.keyIntensity ?? DEFAULT_CONTROLS.keyIntensity,
+      topInset: parsed.topInset ?? DEFAULT_CONTROLS.topInset,
+      bodyRoughness: parsed.bodyRoughness ?? DEFAULT_CONTROLS.bodyRoughness,
+      bodyMetalness: parsed.bodyMetalness ?? DEFAULT_CONTROLS.bodyMetalness,
+      oceanControls: {
+        ...DEFAULT_CONTROLS.oceanControls,
+        ...(parsed.oceanControls ?? {}),
+      },
+    };
+  } catch {
+    return DEFAULT_CONTROLS;
+  }
+}
+
+function writeStoredControls(controls: StoredControls) {
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(controls));
+}
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function oceanColorFromControls(controls: OceanControls) {
+  return new THREE.Color().setHSL(controls.hue, controls.saturation, controls.lightness);
+}
 
 function randomUnit(x: number, y: number, salt = 0) {
   return Math.abs(hash(x + salt * 19.17, y - salt * 23.41) % 1);
@@ -15,6 +86,77 @@ function tileColorVariant(hex: string, x: number, y: number) {
   const lightnessShift = (randomUnit(x, y, 3) - 0.5) * 0.026;
   color.offsetHSL(hueShift, saturationShift, lightnessShift);
   return color;
+}
+
+function cityMarkers() {
+  const hotspots = [
+    { x: 12, y: 10, radius: 4.6 },
+    { x: 30, y: 10, radius: 3.2 },
+    { x: 42, y: 15, radius: 3.8 },
+    { x: 49, y: 12, radius: 4.1 },
+    { x: 55, y: 23, radius: 2.8 },
+    { x: 14, y: 16, radius: 2.6 },
+  ];
+
+  return regionBlocks()
+    .map((block): CityMarker | null => {
+      const cluster = Math.max(
+        0,
+        ...hotspots.map((hotspot) => {
+          const distance = Math.hypot(block.x - hotspot.x, block.y - hotspot.y);
+          return 1 - distance / hotspot.radius;
+        }),
+      );
+      const random = randomUnit(block.x, block.y, 7);
+      const isCity = cluster > 0.42 || random > 0.965;
+      if (!isCity) return null;
+      return {
+        x: block.x,
+        y: block.y,
+        strength: Math.max(0.55, Math.min(1, cluster * 0.65 + random * 0.45)),
+      };
+    })
+    .filter((marker): marker is CityMarker => marker !== null);
+}
+
+function makeCityGlowTexture() {
+  const size = 96;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+
+  const gradient = context.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  gradient.addColorStop(0, "rgba(255, 248, 190, 0.9)");
+  gradient.addColorStop(0.24, "rgba(255, 212, 47, 0.5)");
+  gradient.addColorStop(1, "rgba(255, 180, 0, 0)");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, size, size);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function makeCitySquareTexture() {
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+
+  context.fillStyle = "rgba(255, 249, 191, 1)";
+  context.fillRect(20, 20, 24, 24);
+  context.fillStyle = "rgba(255, 207, 36, 0.78)";
+  context.fillRect(16, 16, 32, 32);
+  context.fillStyle = "rgba(255, 174, 0, 0.35)";
+  context.fillRect(10, 10, 44, 44);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
 }
 
 function resizeRenderer(
@@ -36,12 +178,13 @@ function resizeRenderer(
   camera.updateProjectionMatrix();
 }
 
-function makeTileGeometry() {
+function makeTileGeometry(topInset = 0.13) {
   // The tile is a low keycap: wide at the base, stepped inward at the
   // shoulder, then inward again for a smaller top face.
   const base = 0.49;
-  const shoulder = 0.43;
-  const top = 0.36;
+  const inset = Math.max(0.02, Math.min(0.2, topInset));
+  const shoulder = base - inset * 0.46;
+  const top = base - inset;
   const shoulderHeight = 0.075;
   const height = 0.18;
 
@@ -134,8 +277,8 @@ function addLights(scene: THREE.Scene, keyIntensity: number) {
   key.position.set(-24, 12, -18);
   key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
-  key.shadow.radius = 7;
-  key.shadow.blurSamples = 16;
+  key.shadow.radius = 10;
+  key.shadow.blurSamples = 24;
   key.shadow.camera.left = -38;
   key.shadow.camera.right = 38;
   key.shadow.camera.top = 24;
@@ -146,10 +289,18 @@ function addLights(scene: THREE.Scene, keyIntensity: number) {
   return key;
 }
 
-function buildScene(container: HTMLElement, keyIntensityRef: React.RefObject<number>) {
+function buildScene(
+  container: HTMLElement,
+  keyIntensityRef: React.RefObject<number>,
+  topInsetRef: React.RefObject<number>,
+  bodyRoughnessRef: React.RefObject<number>,
+  bodyMetalnessRef: React.RefObject<number>,
+  oceanControlsRef: React.RefObject<OceanControls>,
+) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.setClearColor(new THREE.Color(OCEAN), 1);
+  const initialOceanColor = oceanColorFromControls(oceanControlsRef.current);
+  renderer.setClearColor(initialOceanColor, 1);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.VSMShadowMap;
   renderer.toneMapping = THREE.NoToneMapping;
@@ -157,8 +308,8 @@ function buildScene(container: HTMLElement, keyIntensityRef: React.RefObject<num
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(OCEAN);
-  scene.fog = new THREE.FogExp2(new THREE.Color(OCEAN), 0.004);
+  scene.background = initialOceanColor.clone();
+  scene.fog = new THREE.FogExp2(initialOceanColor.clone(), 0.004);
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
   camera.position.set(0, 58, 9);
   camera.lookAt(0, 0, 0);
@@ -168,7 +319,9 @@ function buildScene(container: HTMLElement, keyIntensityRef: React.RefObject<num
   const plane = new THREE.Mesh(
     new THREE.PlaneGeometry(240, 160),
     new THREE.MeshLambertMaterial({
-      color: new THREE.Color(OCEAN)
+      color: initialOceanColor,
+      emissive: initialOceanColor,
+      emissiveIntensity: oceanControlsRef.current.emissive,
     }),
   );
   plane.rotation.x = -Math.PI / 2;
@@ -178,9 +331,9 @@ function buildScene(container: HTMLElement, keyIntensityRef: React.RefObject<num
 
   const keyLight = addLights(scene, keyIntensityRef.current);
 
-  const mouseLight = new THREE.PointLight(0xffd21f, 4.8, 11, 1.8);
+  const mouseLight = new THREE.PointLight(0xffd21f, 40.8, 11, 1.8);
   mouseLight.position.set(0, 3.2, 0);
-  //scene.add(mouseLight);
+  scene.add(mouseLight);
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -195,15 +348,19 @@ function buildScene(container: HTMLElement, keyIntensityRef: React.RefObject<num
     mouseLight.position.set(pointerWorld.x, 3.2, pointerWorld.z);
   };
 
-  const tileGeometry = makeTileGeometry();
+  let tileGeometry = makeTileGeometry(topInsetRef.current);
+  let activeTopInset = topInsetRef.current;
+  const tileMeshes: Array<THREE.Mesh<THREE.BufferGeometry, THREE.MeshPhysicalMaterial[]>> = [];
   const materials = new Map<string, THREE.MeshPhysicalMaterial[]>();
+  const bodyMaterials: THREE.MeshPhysicalMaterial[] = [];
   const tileSpacing = .99;
   const group = new THREE.Group();
   group.rotation.x = 0;
   group.rotation.z = 0;
   scene.add(group);
 
-  for (const block of regionBlocks()) {
+  const blocks = regionBlocks();
+  for (const block of blocks) {
     const variant = Math.floor(randomUnit(block.x, block.y, 4) * 5);
     const materialKey = `${block.color}:${variant}`;
     let materialSet = materials.get(materialKey);
@@ -211,21 +368,15 @@ function buildScene(container: HTMLElement, keyIntensityRef: React.RefObject<num
       const tileColor = tileColorVariant(block.color, block.x + variant * 0.1, block.y - variant * 0.1);
       const bodyMaterial = new THREE.MeshPhysicalMaterial({
         color: tileColor,
-        roughness: 0.5,
-        metalness: 0.7,
+        roughness: bodyRoughnessRef.current,
+        metalness: bodyMetalnessRef.current,
         specularColor: new THREE.Color(0xffff00),
         specularIntensity: 1,
         emissive: tileColor.clone().multiplyScalar(0.02),
       });
-      const northBevelMaterial = new THREE.MeshPhysicalMaterial({
-        color: tileColor,
-        roughness: 0.24,
-        metalness: 0.04,
-        specularColor: new THREE.Color(0xffff00),
-        specularIntensity: 1,
-        emissive: tileColor.clone().multiplyScalar(0.015),
-      });
+      const northBevelMaterial = bodyMaterial
       materialSet = [bodyMaterial, northBevelMaterial];
+      bodyMaterials.push(bodyMaterial);
       materials.set(materialKey, materialSet);
     }
 
@@ -238,13 +389,75 @@ function buildScene(container: HTMLElement, keyIntensityRef: React.RefObject<num
     );
     tile.castShadow = true;
     tile.receiveShadow = true;
+    tileMeshes.push(tile);
     group.add(tile);
+  }
+
+  const cityDotGeometry = new THREE.PlaneGeometry(0.14, 0.14);
+  cityDotGeometry.rotateX(-Math.PI / 2);
+  const citySquareTexture = makeCitySquareTexture();
+  const cityDotMaterial = new THREE.MeshBasicMaterial({
+    map: citySquareTexture ?? undefined,
+    color: new THREE.Color("#ffd22a"),
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  const cityGlowTexture = makeCityGlowTexture();
+  const cityGlowMaterial = new THREE.SpriteMaterial({
+    map: cityGlowTexture ?? undefined,
+    color: new THREE.Color("#ffd22a"),
+    transparent: true,
+    opacity: 0.78,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    toneMapped: false,
+  });
+
+  for (const marker of cityMarkers()) {
+    const offsetX = (randomUnit(marker.x, marker.y, 8) - 0.5) * 0.22;
+    const offsetZ = (randomUnit(marker.x, marker.y, 9) - 0.5) * 0.22;
+    const x = (marker.x - TILE_STUDY_COLUMNS / 2 + 0.5) * tileSpacing + offsetX;
+    const z = (marker.y - TILE_STUDY_ROWS / 2 + 0.5) * tileSpacing + offsetZ;
+    const y = 0.25;
+
+    const dot = new THREE.Mesh(cityDotGeometry, cityDotMaterial);
+    dot.position.set(x, y, z);
+    dot.scale.setScalar(0.45 + marker.strength * 1.65);
+    dot.renderOrder = 2;
+    group.add(dot);
+
+    const glow = new THREE.Sprite(cityGlowMaterial);
+    glow.position.set(x, y + 0.025, z);
+    glow.scale.setScalar(0.32 + marker.strength * 0.96);
+    glow.renderOrder = 1;
+    group.add(glow);
   }
 
   let frame = 0;
   const render = () => {
     frame = window.requestAnimationFrame(render);
     keyLight.intensity = keyIntensityRef.current;
+    const oceanColor = oceanColorFromControls(oceanControlsRef.current);
+    const oceanMaterial = plane.material as THREE.MeshLambertMaterial;
+    renderer.setClearColor(oceanColor, 1);
+    scene.background = oceanColor.clone();
+    scene.fog?.color.copy(oceanColor);
+    oceanMaterial.color.copy(oceanColor);
+    oceanMaterial.emissive.copy(oceanColor);
+    oceanMaterial.emissiveIntensity = oceanControlsRef.current.emissive;
+    for (const material of bodyMaterials) {
+      material.roughness = bodyRoughnessRef.current;
+      material.metalness = bodyMetalnessRef.current;
+    }
+    if (topInsetRef.current !== activeTopInset) {
+      const nextGeometry = makeTileGeometry(topInsetRef.current);
+      for (const tile of tileMeshes) tile.geometry = nextGeometry;
+      tileGeometry.dispose();
+      tileGeometry = nextGeometry;
+      activeTopInset = topInsetRef.current;
+    }
     camera.lookAt(cameraTarget);
     renderer.render(scene, camera);
   };
@@ -332,6 +545,11 @@ function buildScene(container: HTMLElement, keyIntensityRef: React.RefObject<num
     renderer.domElement.removeEventListener("pointerup", onPointerEnd);
     renderer.domElement.removeEventListener("pointercancel", onPointerEnd);
     tileGeometry.dispose();
+    cityDotGeometry.dispose();
+    citySquareTexture?.dispose();
+    cityDotMaterial.dispose();
+    cityGlowTexture?.dispose();
+    cityGlowMaterial.dispose();
     plane.geometry.dispose();
     if (Array.isArray(plane.material)) plane.material.forEach((material) => material.dispose());
     else plane.material.dispose();
@@ -345,33 +563,156 @@ function buildScene(container: HTMLElement, keyIntensityRef: React.RefObject<num
 
 export function TileAesthetic3DPage() {
   const stageRef = useRef<HTMLDivElement | null>(null);
-  const keyIntensityRef = useRef(9.);
+  const initialControls = useRef<StoredControls>(readStoredControls());
+  const keyIntensityRef = useRef(initialControls.current.keyIntensity);
+  const topInsetRef = useRef(initialControls.current.topInset);
+  const bodyRoughnessRef = useRef(initialControls.current.bodyRoughness);
+  const bodyMetalnessRef = useRef(initialControls.current.bodyMetalness);
+  const oceanControlsRef = useRef<OceanControls>({ ...initialControls.current.oceanControls });
   const [keyIntensity, setKeyIntensity] = useState(keyIntensityRef.current);
+  const [topInset, setTopInset] = useState(topInsetRef.current);
+  const [bodyRoughness, setBodyRoughness] = useState(bodyRoughnessRef.current);
+  const [bodyMetalness, setBodyMetalness] = useState(bodyMetalnessRef.current);
+  const [oceanControls, setOceanControls] = useState(oceanControlsRef.current);
 
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return undefined;
-    return buildScene(stage, keyIntensityRef);
+    return buildScene(stage, keyIntensityRef, topInsetRef, bodyRoughnessRef, bodyMetalnessRef, oceanControlsRef);
   }, []);
+
+  const setOceanControl = (key: keyof OceanControls, value: number) => {
+    const nextControls = { ...oceanControlsRef.current, [key]: value };
+    oceanControlsRef.current = nextControls;
+    setOceanControls(nextControls);
+  };
+
+  useEffect(() => {
+    writeStoredControls({
+      keyIntensity,
+      topInset,
+      bodyRoughness,
+      bodyMetalness,
+      oceanControls,
+    });
+  }, [bodyMetalness, bodyRoughness, keyIntensity, oceanControls, topInset]);
 
   return (
     <main className="tile-study-app tile-study-3d" ref={stageRef} aria-label="3D economic tile aesthetic study">
-      <label className="tile-light-control">
-        <span>Light</span>
-        <input
-          type="range"
-          min="0"
-          max="30"
-          step="0.1"
-          value={keyIntensity}
-          onChange={(event) => {
-            const nextIntensity = Number(event.currentTarget.value);
-            keyIntensityRef.current = nextIntensity;
-            setKeyIntensity(nextIntensity);
-          }}
-        />
-        <output>{keyIntensity.toFixed(1)}</output>
-      </label>
+      <div className="tile-controls">
+        <label className="tile-control-row">
+          <span>Light</span>
+          <input
+            type="range"
+            min="0"
+            max="30"
+            step="0.1"
+            value={keyIntensity}
+            onChange={(event) => {
+              const nextIntensity = Number(event.currentTarget.value);
+              keyIntensityRef.current = nextIntensity;
+              setKeyIntensity(nextIntensity);
+            }}
+          />
+          <output>{keyIntensity.toFixed(1)}</output>
+        </label>
+        <label className="tile-control-row">
+          <span>Inset</span>
+          <input
+            type="range"
+            min="0.02"
+            max="0.2"
+            step="0.005"
+            value={topInset}
+            onChange={(event) => {
+              const nextInset = Number(event.currentTarget.value);
+              topInsetRef.current = nextInset;
+              setTopInset(nextInset);
+            }}
+          />
+          <output>{topInset.toFixed(3)}</output>
+        </label>
+        <label className="tile-control-row">
+          <span>Rough</span>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={bodyRoughness}
+            onChange={(event) => {
+              const nextRoughness = Number(event.currentTarget.value);
+              bodyRoughnessRef.current = nextRoughness;
+              setBodyRoughness(nextRoughness);
+            }}
+          />
+          <output>{bodyRoughness.toFixed(2)}</output>
+        </label>
+        <label className="tile-control-row">
+          <span>Metal</span>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={bodyMetalness}
+            onChange={(event) => {
+              const nextMetalness = Number(event.currentTarget.value);
+              bodyMetalnessRef.current = nextMetalness;
+              setBodyMetalness(nextMetalness);
+            }}
+          />
+          <output>{bodyMetalness.toFixed(2)}</output>
+        </label>
+        <label className="tile-control-row">
+          <span>Ocn H</span>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.005"
+            value={oceanControls.hue}
+            onChange={(event) => setOceanControl("hue", Number(event.currentTarget.value))}
+          />
+          <output>{oceanControls.hue.toFixed(2)}</output>
+        </label>
+        <label className="tile-control-row">
+          <span>Ocn S</span>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={oceanControls.saturation}
+            onChange={(event) => setOceanControl("saturation", Number(event.currentTarget.value))}
+          />
+          <output>{oceanControls.saturation.toFixed(2)}</output>
+        </label>
+        <label className="tile-control-row">
+          <span>Ocn L</span>
+          <input
+            type="range"
+            min="0"
+            max="0.25"
+            step="0.005"
+            value={oceanControls.lightness}
+            onChange={(event) => setOceanControl("lightness", Number(event.currentTarget.value))}
+          />
+          <output>{oceanControls.lightness.toFixed(3)}</output>
+        </label>
+        <label className="tile-control-row">
+          <span>Ocn E</span>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={oceanControls.emissive}
+            onChange={(event) => setOceanControl("emissive", Number(event.currentTarget.value))}
+          />
+          <output>{oceanControls.emissive.toFixed(2)}</output>
+        </label>
+      </div>
     </main>
   );
 }
