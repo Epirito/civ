@@ -37,7 +37,7 @@ button {
   backdrop-filter: blur(12px);
 }
 
-.page-switcher button {
+.page-switcher a {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -48,10 +48,12 @@ button {
   background: transparent;
   color: #b8cbd2;
   cursor: pointer;
+  font: inherit;
+  text-decoration: none;
 }
 
-.page-switcher button.active,
-.page-switcher button:hover {
+.page-switcher a.active,
+.page-switcher a:hover {
   background: rgba(255, 255, 255, 0.12);
   color: #ffffff;
 }
@@ -422,6 +424,137 @@ h2 {
 .tile-control-row output {
   color: #ffd45a;
   text-align: right;
+}
+
+.field-experiment-app {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100vh;
+  min-height: 620px;
+  overflow: hidden;
+  background: #071014;
+}
+
+.field-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-height: 0;
+  overflow: auto;
+  padding: 26px;
+  border-right: 1px solid rgba(232, 238, 243, 0.12);
+  background: #0b171b;
+}
+
+.field-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, 42px);
+  gap: 8px;
+}
+
+.field-buttons button {
+  display: grid;
+  place-items: center;
+  min-height: 42px;
+  border: 1px solid rgba(232, 238, 243, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #d8e5eb;
+  cursor: pointer;
+}
+
+.field-buttons button:hover {
+  border-color: rgba(232, 238, 243, 0.34);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.field-stats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 14px;
+  padding: 14px;
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 8px;
+  background: rgba(125, 211, 252, 0.07);
+  color: #9fb8c2;
+  font-size: 13px;
+}
+
+.field-stats strong {
+  color: #ffffff;
+}
+
+.field-sliders {
+  display: grid;
+  gap: 14px;
+}
+
+.field-sliders label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  color: #b8cbd2;
+  font-size: 13px;
+}
+
+.field-sliders input {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.field-source-list {
+  display: grid;
+  gap: 8px;
+}
+
+.field-source-list button {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid rgba(232, 238, 243, 0.13);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #b8cbd2;
+  cursor: pointer;
+  text-align: left;
+}
+
+.field-source-list button.active {
+  border-color: rgba(250, 204, 21, 0.5);
+  background: rgba(250, 204, 21, 0.11);
+  color: #ffffff;
+}
+
+.field-source-list i {
+  color: #9fb8c2;
+  font-style: normal;
+}
+
+.field-remove-source {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: #d8e5eb;
+}
+
+.field-remove-source:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.field-canvas-wrap {
+  min-width: 0;
+  min-height: 0;
+}
+
+.field-canvas-wrap canvas {
+  cursor: crosshair;
 }
 
 canvas {

@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { fromArrayBuffer } from "geotiff";
-import { BarChart3, Blocks, Box, Eye, EyeOff, LocateFixed, Map, Minus, Plus, RotateCcw } from "lucide-react";
-import { EconomicSimPage, TileAesthetic3DPage, TileAestheticPage } from "./economic-sim";
+import { Activity, BarChart3, Blocks, Box, Eye, EyeOff, LocateFixed, Map, Minus, Plus, RotateCcw } from "lucide-react";
+import { EconomicSimPage, PriceFieldExperimentPage, TileAesthetic3DPage, TileAestheticPage } from "./economic-sim";
 import "./styles.css";
 
 type Position = [number, number];
@@ -461,52 +461,81 @@ function GeoMapPage() {
   );
 }
 
-type AppPage = "map" | "sim" | "tiles" | "tiles3d";
+type RouteKey = "map" | "sim" | "field" | "tiles" | "tiles3d";
 
-function pageFromHash(): AppPage {
-  if (window.location.hash === "#sim") return "sim";
-  if (window.location.hash === "#tiles") return "tiles";
-  if (window.location.hash === "#tiles3d") return "tiles3d";
-  return "map";
+type AppRoute = {
+  key: RouteKey;
+  path: string;
+  label: string;
+  icon: React.ReactNode;
+  element: React.ReactNode;
+};
+
+const ROUTES: AppRoute[] = [
+  { key: "map", path: "/", label: "Geo canvas", icon: <Map size={16} />, element: <GeoMapPage /> },
+  { key: "sim", path: "/economic-sim", label: "Economic sim", icon: <BarChart3 size={16} />, element: <EconomicSimPage /> },
+  {
+    key: "field",
+    path: "/price-field",
+    label: "Price field",
+    icon: <Activity size={16} />,
+    element: <PriceFieldExperimentPage />,
+  },
+  { key: "tiles", path: "/tile-study", label: "Tile study", icon: <Blocks size={16} />, element: <TileAestheticPage /> },
+  { key: "tiles3d", path: "/tile-study-3d", label: "3D tiles", icon: <Box size={16} />, element: <TileAesthetic3DPage /> },
+];
+
+const LEGACY_HASH_ROUTES: Record<string, string> = {
+  "#sim": "/economic-sim",
+  "#tiles": "/tile-study",
+  "#tiles3d": "/tile-study-3d",
+};
+
+function routeFromLocation() {
+  return ROUTES.find((route) => route.path === window.location.pathname) ?? ROUTES[0];
 }
 
 function App() {
-  const [page, setPage] = useState<AppPage>(pageFromHash);
+  const [route, setRoute] = useState(routeFromLocation);
 
-  function showPage(nextPage: AppPage) {
-    window.location.hash = nextPage === "map" ? "" : nextPage;
-    setPage(nextPage);
+  useEffect(() => {
+    const legacyPath = LEGACY_HASH_ROUTES[window.location.hash];
+    if (legacyPath) {
+      window.history.replaceState(null, "", legacyPath);
+      setRoute(routeFromLocation());
+    }
+
+    const onPopState = () => setRoute(routeFromLocation());
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  function navigate(nextRoute: AppRoute) {
+    if (nextRoute.path !== window.location.pathname) {
+      window.history.pushState(null, "", nextRoute.path);
+    }
+    setRoute(nextRoute);
   }
 
   return (
     <>
       <nav className="page-switcher" aria-label="Pages">
-        <button className={page === "map" ? "active" : ""} onClick={() => showPage("map")}>
-          <Map size={16} />
-          <span>Geo canvas</span>
-        </button>
-        <button className={page === "sim" ? "active" : ""} onClick={() => showPage("sim")}>
-          <BarChart3 size={16} />
-          <span>Economic sim</span>
-        </button>
-        <button className={page === "tiles" ? "active" : ""} onClick={() => showPage("tiles")}>
-          <Blocks size={16} />
-          <span>Tile study</span>
-        </button>
-        <button className={page === "tiles3d" ? "active" : ""} onClick={() => showPage("tiles3d")}>
-          <Box size={16} />
-          <span>3D tiles</span>
-        </button>
+        {ROUTES.map((nextRoute) => (
+          <a
+            key={nextRoute.key}
+            className={route.key === nextRoute.key ? "active" : ""}
+            href={nextRoute.path}
+            onClick={(event) => {
+              event.preventDefault();
+              navigate(nextRoute);
+            }}
+          >
+            {nextRoute.icon}
+            <span>{nextRoute.label}</span>
+          </a>
+        ))}
       </nav>
-      {page === "map" ? (
-        <GeoMapPage />
-      ) : page === "sim" ? (
-        <EconomicSimPage />
-      ) : page === "tiles" ? (
-        <TileAestheticPage />
-      ) : (
-        <TileAesthetic3DPage />
-      )}
+      {route.element}
     </>
   );
 }
