@@ -1,8 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { fromArrayBuffer } from "geotiff";
-import { Activity, BarChart3, Blocks, Box, Eye, EyeOff, LocateFixed, Map, Minus, Plus, RotateCcw } from "lucide-react";
-import { EconomicSimPage, PriceFieldExperimentPage, TileAesthetic3DPage, TileAestheticPage } from "./economic-sim";
+import { Activity, BarChart3, Blocks, Box, Eye, EyeOff, LocateFixed, Map, Minus, Plus, RotateCcw, Truck } from "lucide-react";
+import {
+  EconomicSimPage,
+  PriceFieldExperimentPage,
+  PriceFieldLogisticsPage,
+  TileAesthetic3DPage,
+  TileAestheticPage,
+} from "./economic-sim";
 import "./styles.css";
 
 type Position = [number, number];
@@ -461,7 +467,7 @@ function GeoMapPage() {
   );
 }
 
-type RouteKey = "map" | "sim" | "field" | "tiles" | "tiles3d";
+type RouteKey = "map" | "sim" | "field" | "fieldLogistics" | "tiles" | "tiles3d";
 
 type AppRoute = {
   key: RouteKey;
@@ -480,6 +486,13 @@ const ROUTES: AppRoute[] = [
     label: "Price field",
     icon: <Activity size={16} />,
     element: <PriceFieldExperimentPage />,
+  },
+  {
+    key: "fieldLogistics",
+    path: "/price-logistics",
+    label: "Field logistics",
+    icon: <Truck size={16} />,
+    element: <PriceFieldLogisticsPage />,
   },
   { key: "tiles", path: "/tile-study", label: "Tile study", icon: <Blocks size={16} />, element: <TileAestheticPage /> },
   { key: "tiles3d", path: "/tile-study-3d", label: "3D tiles", icon: <Box size={16} />, element: <TileAesthetic3DPage /> },

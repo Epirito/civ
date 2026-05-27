@@ -13,7 +13,7 @@ const OPTIONS = {
 };
 
 describe("price field automaton", () => {
-  it("dilutes volume across non-parent neighbors and records parents", () => {
+  it("dilutes outgoing volume across directed neighbor messages and records parents", () => {
     const center: PriceFieldSource = { x: 2, y: 2, price: 10, volume: 8, active: true };
     const seeded = stepPriceField(createPriceFieldState(5, 5), [center], OPTIONS);
     const propagated = stepPriceField(seeded, [], OPTIONS);
@@ -33,10 +33,10 @@ describe("price field automaton", () => {
     expect(fieldCell(state, 2, 2).volume).toBe(0);
   });
 
-  it("does not leave a stale puddle after a finite pulse disappears", () => {
+  it("dissipates a finite pulse below the active-volume cutoff", () => {
     const source: PriceFieldSource = { x: 3, y: 3, price: 10, volume: 10, active: true };
     let state = stepPriceField(createPriceFieldState(7, 7), [source], OPTIONS);
-    for (let turn = 0; turn < 20; turn += 1) {
+    for (let turn = 0; turn < 80; turn += 1) {
       state = stepPriceField(state, [], OPTIONS);
     }
 

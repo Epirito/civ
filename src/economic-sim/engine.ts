@@ -114,7 +114,7 @@ function midpointPrice(bidPrice: number, askPrice: number) {
   return Math.round(checkedAdd(bidPrice, askPrice, "midpoint trade price") / 2);
 }
 
-function placeOrder(
+export function placeOrder(
   ledger: Ledger,
   orders: Order[],
   nextOrderId: number,

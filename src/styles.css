@@ -449,7 +449,7 @@ h2 {
 
 .field-buttons {
   display: grid;
-  grid-template-columns: repeat(3, 42px);
+  grid-template-columns: repeat(4, 42px);
   gap: 8px;
 }
 
@@ -464,7 +464,8 @@ h2 {
   cursor: pointer;
 }
 
-.field-buttons button:hover {
+.field-buttons button:hover,
+.field-buttons button.active {
   border-color: rgba(232, 238, 243, 0.34);
   background: rgba(255, 255, 255, 0.1);
 }
@@ -483,6 +484,59 @@ h2 {
 
 .field-stats strong {
   color: #ffffff;
+}
+
+.field-agent-table {
+  display: grid;
+  gap: 4px;
+  color: #d8e5eb;
+  font-size: 12px;
+}
+
+.field-agent-header,
+.field-agent-row {
+  display: grid;
+  grid-template-columns: minmax(82px, 1fr) repeat(4, minmax(42px, auto));
+  align-items: center;
+  gap: 8px;
+}
+
+.field-agent-header {
+  color: #8fb8c9;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.field-agent-row {
+  min-height: 24px;
+  padding: 0 0 3px;
+  border-bottom: 1px solid rgba(232, 238, 243, 0.09);
+}
+
+.field-agent-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.field-agent-row span:not(:first-child),
+.field-agent-header span:not(:first-child) {
+  text-align: right;
+}
+
+.field-agent-row span:first-child {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.field-agent-row i {
+  display: block;
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
 }
 
 .field-sliders {
@@ -549,6 +603,7 @@ h2 {
 }
 
 .field-canvas-wrap {
+  position: relative;
   min-width: 0;
   min-height: 0;
 }

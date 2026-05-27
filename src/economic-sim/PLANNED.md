@@ -4,3 +4,4 @@ so at 100km/h a land vehicle would traverse roughly 2400km a day = 16800km a wee
 infantry would traverse 1/20 of that or roughly 1 cell per turn
 - widgets + human-time + factory-time = weapons
 - widgets
+
