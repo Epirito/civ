@@ -496,7 +496,7 @@ h2 {
 .field-agent-header,
 .field-agent-row {
   display: grid;
-  grid-template-columns: minmax(82px, 1fr) repeat(4, minmax(42px, auto));
+  grid-template-columns: minmax(82px, 1fr) repeat(5, minmax(42px, auto));
   align-items: center;
   gap: 8px;
 }
@@ -646,6 +646,59 @@ canvas {
 
 .sim-readout span {
   color: #c6d6dc;
+}
+
+.cell-hover-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cell-hover-summary span,
+.cell-resource-row span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cell-resource-table {
+  display: grid;
+  gap: 3px;
+  min-width: min(680px, calc(100vw - 64px));
+  font-size: 12px;
+}
+
+.cell-resource-header,
+.cell-resource-row {
+  display: grid;
+  grid-template-columns: minmax(68px, 0.8fr) minmax(82px, 1fr) repeat(3, minmax(64px, 0.75fr)) minmax(84px, 1fr) minmax(58px, 0.7fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.cell-resource-header {
+  color: #8fb8c9;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.cell-resource-row {
+  min-height: 24px;
+  border-top: 1px solid rgba(232, 238, 243, 0.09);
+}
+
+.cell-resource-row span,
+.cell-resource-header span,
+.cell-channel-line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-resource-row span:not(:first-child),
+.cell-resource-header span:not(:first-child) {
+  text-align: right;
 }
 
 @media (max-width: 840px) {

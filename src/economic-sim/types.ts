@@ -11,10 +11,11 @@ export type Resource =
   | "road"
   | "congestion"
   | "last-congestion"
+  | "labor"
   | "electricity"
   | "power-line"
   | "power-plant";
-export type MarketResource = "widget" | "electricity";
+export type MarketResource = "widget" | "labor" | "electricity";
 export type Account = "" | `${number},${number}`;
 export type Side = "bid" | "ask";
 

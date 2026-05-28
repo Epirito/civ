@@ -1,14 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { FastForward, Pause, Play, RotateCcw, SkipForward } from "lucide-react";
+import { DollarSign, Factory, FastForward, Package, Pause, Play, RotateCcw, SkipForward, Users } from "lucide-react";
 import {
-  createPriceLogisticsState,
+  effectiveProductBid,
   logisticsCell,
-  stepPriceLogistics,
   type PriceLogisticsCell,
   type PriceLogisticsEvent,
   type PriceLogisticsState,
-} from "./priceFieldLogisticsSim";
-import { fieldCell } from "./priceFieldAutomaton";
+} from "./engine";
+import { stepPriceLogistics } from "./agents";
+import { createPriceLogisticsState } from "./scenario";
+import { fieldCell } from "../priceFieldAutomaton";
 
 function drawLogistics(canvas: HTMLCanvasElement, state: PriceLogisticsState) {
   const parent = canvas.parentElement;
@@ -55,6 +56,10 @@ function drawLogistics(canvas: HTMLCanvasElement, state: PriceLogisticsState) {
       context.fillStyle = "#f59e0b";
       context.fillRect(x + cellSize - Math.max(7, cellSize * 0.24), y + 3, Math.max(4, cellSize * 0.2), Math.max(4, cellSize * 0.2));
     }
+    if (cell.population > 0) {
+      context.fillStyle = "#22c55e";
+      context.fillRect(x + 3, y + cellSize - Math.max(7, cellSize * 0.24), Math.max(4, cellSize * 0.2), Math.max(4, cellSize * 0.2));
+    }
     if (cell.logisticsStock > 0 || cell.movedStock > 0) {
       context.fillStyle = cell.movedStock > 0 ? "#fef08a" : "#ffffff";
       context.beginPath();
@@ -78,6 +83,7 @@ function drawLogistics(canvas: HTMLCanvasElement, state: PriceLogisticsState) {
 
 function eventLabel(event: PriceLogisticsEvent) {
   if (event.kind === "buy") return `buy ${event.x},${event.y} @ ${event.price}`;
+  if (event.kind === "labor") return `labor ${event.quantity} at ${event.x},${event.y} @ ${event.price}`;
   if (event.kind === "sell") return `sell ${event.quantity} at ${event.x},${event.y} @ ${event.price}`;
   return `move ${event.fromX},${event.fromY} -> ${event.toX},${event.toY}`;
 }
@@ -94,18 +100,61 @@ function cellFromPointer(canvas: HTMLCanvasElement, state: PriceLogisticsState, 
   return x >= 0 && y >= 0 && x < state.width && y < state.height ? { x, y } : null;
 }
 
-function hoverLines(state: PriceLogisticsState, cell: PriceLogisticsCell) {
+function CellHoverReadout({ state, cell }: { state: PriceLogisticsState; cell: PriceLogisticsCell | null }) {
+  if (!cell) return <strong>{state.width} x {state.height} field logistics</strong>;
   const field = fieldCell(state.bidField, cell.x, cell.y);
-  return [
-    `Local bid ${cell.localBid} x ${cell.bidVolume}`,
-    `Consumer money ${cell.consumerMoney}`,
-    `Bid last filled ${cell.lastBidFilled}; unfilled ${cell.lastBidUnfilled}`,
-    `Local ask ${cell.localAsk || "-"}; Producer stock ${cell.producerStock}`,
-    `Ask last filled ${cell.lastAskFilled}; unfilled ${cell.lastAskUnfilled}`,
-    `Field bid ${field.price.toFixed(1)}; field volume ${field.volume.toFixed(2)}`,
-    `Logistics stock ${cell.logisticsStock}; moved stock ${cell.movedStock}`,
-    `Channels ${field.channels.map((channel) => `${channel.sourceId}:${channel.price.toFixed(1)}`).join(", ") || "-"}`,
-  ];
+  const bid = effectiveProductBid(cell);
+  return (
+    <>
+      <strong>Cell {cell.x},{cell.y}</strong>
+      <div className="cell-hover-summary">
+        <span><DollarSign size={13} />{Math.round(cell.consumerMoney)}</span>
+        <span><Users size={13} />{cell.population}</span>
+        <span><Factory size={13} />{cell.localAsk || "-"}</span>
+      </div>
+      <div className="cell-resource-table">
+        <div className="cell-resource-header">
+          <span>Resource</span>
+          <span>Price</span>
+          <span>Consumer</span>
+          <span>Producer</span>
+          <span>Logistics</span>
+          <span>Last</span>
+          <span>Signal</span>
+        </div>
+        <div className="cell-resource-row">
+          <span><Package size={13} />Product</span>
+          <span>bid {bid || "-"} / ask {cell.localAsk || "-"}</span>
+          <span>demand {cell.bidVolume}</span>
+          <span>{cell.producerStock}</span>
+          <span>{cell.logisticsStock}+{cell.movedStock}</span>
+          <span>b {cell.lastBidFilled}/{cell.lastBidUnfilled}; a {cell.lastAskFilled}/{cell.lastAskUnfilled}</span>
+          <span>{field.price.toFixed(1)} x {field.volume.toFixed(1)}</span>
+        </div>
+        <div className="cell-resource-row">
+          <span><Users size={13} />Labor</span>
+          <span>ask {cell.laborAsk || "-"}</span>
+          <span>{cell.laborStock}/{cell.population}</span>
+          <span>-</span>
+          <span>-</span>
+          <span>{cell.lastLaborFilled}/{cell.lastLaborUnfilled}</span>
+          <span>-</span>
+        </div>
+        <div className="cell-resource-row">
+          <span><DollarSign size={13} />Money</span>
+          <span>-</span>
+          <span>{Math.round(cell.consumerMoney)}</span>
+          <span>{Math.round(state.producerMoney)}</span>
+          <span>{Math.round(state.money)}</span>
+          <span>-</span>
+          <span>-</span>
+        </div>
+      </div>
+      <span className="cell-channel-line">
+        Channels {field.channels.map((channel) => `${channel.sourceId}:${channel.price.toFixed(1)}`).join(", ") || "-"}
+      </span>
+    </>
+  );
 }
 
 export function PriceFieldLogisticsPage() {
@@ -121,12 +170,13 @@ export function PriceFieldLogisticsPage() {
       logistics: state.cells.reduce((sum, cell) => sum + cell.logisticsStock, 0),
       moved: state.cells.reduce((sum, cell) => sum + cell.movedStock, 0),
       demand: state.cells.reduce((sum, cell) => sum + cell.bidVolume, 0),
+      population: state.cells.reduce((sum, cell) => sum + cell.population, 0),
+      labor: state.cells.reduce((sum, cell) => sum + cell.laborStock, 0),
       consumerMoney: state.cells.reduce((sum, cell) => sum + cell.consumerMoney, 0),
     }),
     [state],
   );
   const hoveredCell = hover ? logisticsCell(state, hover.x, hover.y) : null;
-  const readoutLines = hoveredCell ? hoverLines(state, hoveredCell) : [];
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -193,6 +243,8 @@ export function PriceFieldLogisticsPage() {
           <strong>{totals.moved}</strong>
           <span>Demand</span>
           <strong>{totals.demand}</strong>
+          <span>Labor</span>
+          <strong>{totals.labor}</strong>
           <span>Center</span>
           <strong>{Math.round(fieldCell(state.bidField, 9, 6).price)}</strong>
         </section>
@@ -205,11 +257,13 @@ export function PriceFieldLogisticsPage() {
               <span>Product</span>
               <span>Moved</span>
               <span>Demand</span>
+              <span>Labor</span>
             </div>
             <div className="field-agent-row">
               <span><i style={{ background: "#f59e0b" }} />Producer</span>
               <span>{Math.round(state.producerMoney)}</span>
               <span>{totals.producer}</span>
+              <span>-</span>
               <span>-</span>
               <span>-</span>
             </div>
@@ -219,6 +273,7 @@ export function PriceFieldLogisticsPage() {
               <span>{totals.logistics}</span>
               <span>{totals.moved}</span>
               <span>-</span>
+              <span>-</span>
             </div>
             <div className="field-agent-row">
               <span><i style={{ background: "#38bdf8" }} />Consumers</span>
@@ -226,6 +281,7 @@ export function PriceFieldLogisticsPage() {
               <span>-</span>
               <span>-</span>
               <span>{totals.demand}</span>
+              <span>{totals.labor}/{totals.population}</span>
             </div>
           </div>
         </section>
@@ -253,10 +309,7 @@ export function PriceFieldLogisticsPage() {
           onPointerLeave={() => setHover(null)}
         />
         <div className="readout sim-readout">
-          <strong>{hoveredCell ? `Cell ${hoveredCell.x},${hoveredCell.y}` : `${state.width} x ${state.height} field logistics`}</strong>
-          {readoutLines.map((line) => (
-            <span key={line}>{line}</span>
-          ))}
+          <CellHoverReadout state={state} cell={hoveredCell} />
         </div>
       </section>
     </main>
