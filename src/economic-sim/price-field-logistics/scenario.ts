@@ -23,8 +23,10 @@ export function createPriceLogisticsState(width = 18, height = 12): PriceLogisti
         localBid: population > 0 ? 9 + ((x * 5 + y * 3) % 15) : 0,
         consumerMoney: 0,
         population,
+        laborBid: factory ? 8 + ((x + y) % 5) : 0,
         laborAsk: population > 0 ? 3 + ((x + y * 2) % 6) : 0,
         laborStock: 0,
+        fieldBid: 0,
         bidVolume: 0,
         localAsk: factory ? 4 + ((x * 2 + y) % 7) : 0,
         producerStock: 0,
@@ -32,12 +34,18 @@ export function createPriceLogisticsState(width = 18, height = 12): PriceLogisti
         movedStock: 0,
         lastBidFilled: 0,
         lastBidUnfilled: 0,
+        lastLaborBidFilled: 0,
+        lastLaborBidUnfilled: factory ? 1 : 0,
         lastLaborFilled: 0,
         lastLaborUnfilled: population,
         lastAskFilled: 0,
         lastAskUnfilled: factory ? 1 : 0,
       };
-      if (population > 0) addLedgerBalance(ledger, `Consumer-${x},${y}`, accountOfCell(cell), "labor", population);
+      if (population > 0) {
+        addLedgerBalance(ledger, `Consumer-${x},${y}`, accountOfCell(cell), "labor", population);
+        addLedgerBalance(ledger, `Consumer-${x},${y}`, MONEY_ACCOUNT, "money", population * 20);
+      }
+      if (factory) addLedgerBalance(ledger, PRODUCER_AGENT, accountOfCell(cell), "factory", 1);
       if ((x + y) % 17 === 0) addLedgerBalance(ledger, LOGISTICS_AGENT, accountOfCell(cell), "product", 2);
       return cell;
     }),
@@ -55,6 +63,12 @@ export function createPriceLogisticsState(width = 18, height = 12): PriceLogisti
     orders: [],
     lastOrderResults: [],
     trades: [],
+    recipes: [{
+      id: "factory-product",
+      inputs: { labor: 1 },
+      requirements: { factory: 1 },
+      outputs: { product: 1 },
+    }],
     money: 180,
     producerMoney: 120,
     cells,

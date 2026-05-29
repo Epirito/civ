@@ -1,13 +1,21 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { DollarSign, Factory, FastForward, Package, Pause, Play, RotateCcw, SkipForward, Users } from "lucide-react";
 import {
-  effectiveProductBid,
+  LOGISTICS_AGENT,
+  MONEY_ACCOUNT,
+  PRODUCER_AGENT,
+  accountOfCell,
+  consumerAgentForCell,
+  getLedgerBalance,
   logisticsCell,
+  type PriceAgent,
   type PriceLogisticsCell,
   type PriceLogisticsEvent,
   type PriceLogisticsState,
+  type PriceResource,
 } from "./engine";
-import { stepPriceLogistics } from "./agents";
+import type { Account } from "../types";
+import { effectiveProductBid, stepPriceLogistics } from "./agents";
 import { createPriceLogisticsState } from "./scenario";
 import { fieldCell } from "../priceFieldAutomaton";
 
@@ -104,13 +112,16 @@ function CellHoverReadout({ state, cell }: { state: PriceLogisticsState; cell: P
   if (!cell) return <strong>{state.width} x {state.height} field logistics</strong>;
   const field = fieldCell(state.bidField, cell.x, cell.y);
   const bid = effectiveProductBid(cell);
+  const account = accountOfCell(cell);
+  const consumer = consumerAgentForCell(cell);
+  const balance = (agent: PriceAgent, ledgerAccount: Account, resource: PriceResource) =>
+    getLedgerBalance(state.ledger, agent, ledgerAccount, resource);
   return (
     <>
       <strong>Cell {cell.x},{cell.y}</strong>
       <div className="cell-hover-summary">
         <span><DollarSign size={13} />{Math.round(cell.consumerMoney)}</span>
         <span><Users size={13} />{cell.population}</span>
-        <span><Factory size={13} />{cell.localAsk || "-"}</span>
       </div>
       <div className="cell-resource-table">
         <div className="cell-resource-header">
@@ -125,27 +136,36 @@ function CellHoverReadout({ state, cell }: { state: PriceLogisticsState; cell: P
         <div className="cell-resource-row">
           <span><Package size={13} />Product</span>
           <span>bid {bid || "-"} / ask {cell.localAsk || "-"}</span>
-          <span>demand {cell.bidVolume}</span>
-          <span>{cell.producerStock}</span>
-          <span>{cell.logisticsStock}+{cell.movedStock}</span>
-          <span>b {cell.lastBidFilled}/{cell.lastBidUnfilled}; a {cell.lastAskFilled}/{cell.lastAskUnfilled}</span>
-          <span>{field.price.toFixed(1)} x {field.volume.toFixed(1)}</span>
+          <span>{balance(consumer, account, "product")}</span>
+          <span>{balance(PRODUCER_AGENT, account, "product")}</span>
+          <span>{balance(LOGISTICS_AGENT, account, "product")}</span>
+          <span>b {cell.lastBidFilled}/{cell.lastBidUnfilled}; a {cell.lastAskFilled}/{cell.lastAskUnfilled}; m {cell.movedStock}</span>
+          <span>src {cell.fieldBid.toFixed(1)} x {cell.bidVolume.toFixed(1)}; field {field.price.toFixed(1)} x {field.volume.toFixed(1)}</span>
         </div>
         <div className="cell-resource-row">
           <span><Users size={13} />Labor</span>
-          <span>ask {cell.laborAsk || "-"}</span>
-          <span>{cell.laborStock}/{cell.population}</span>
+          <span>bid {cell.laborBid || "-"} / ask {cell.laborAsk || "-"}</span>
+          <span>{balance(consumer, account, "labor")}</span>
+          <span>{balance(PRODUCER_AGENT, account, "labor")}</span>
+          <span>{balance(LOGISTICS_AGENT, account, "labor")}</span>
+          <span>b {cell.lastLaborBidFilled}/{cell.lastLaborBidUnfilled}; a {cell.lastLaborFilled}/{cell.lastLaborUnfilled}</span>
           <span>-</span>
+        </div>
+        <div className="cell-resource-row">
+          <span><Factory size={13} />Factory</span>
           <span>-</span>
-          <span>{cell.lastLaborFilled}/{cell.lastLaborUnfilled}</span>
+          <span>{balance(consumer, account, "factory")}</span>
+          <span>{balance(PRODUCER_AGENT, account, "factory")}</span>
+          <span>{balance(LOGISTICS_AGENT, account, "factory")}</span>
+          <span>-</span>
           <span>-</span>
         </div>
         <div className="cell-resource-row">
           <span><DollarSign size={13} />Money</span>
           <span>-</span>
-          <span>{Math.round(cell.consumerMoney)}</span>
-          <span>{Math.round(state.producerMoney)}</span>
-          <span>{Math.round(state.money)}</span>
+          <span>{Math.round(balance(consumer, MONEY_ACCOUNT, "money"))}</span>
+          <span>{Math.round(balance(PRODUCER_AGENT, MONEY_ACCOUNT, "money"))}</span>
+          <span>{Math.round(balance(LOGISTICS_AGENT, MONEY_ACCOUNT, "money"))}</span>
           <span>-</span>
           <span>-</span>
         </div>
@@ -169,7 +189,7 @@ export function PriceFieldLogisticsPage() {
       producer: state.cells.reduce((sum, cell) => sum + cell.producerStock, 0),
       logistics: state.cells.reduce((sum, cell) => sum + cell.logisticsStock, 0),
       moved: state.cells.reduce((sum, cell) => sum + cell.movedStock, 0),
-      demand: state.cells.reduce((sum, cell) => sum + cell.bidVolume, 0),
+      residualDemand: state.cells.reduce((sum, cell) => sum + cell.bidVolume, 0),
       population: state.cells.reduce((sum, cell) => sum + cell.population, 0),
       labor: state.cells.reduce((sum, cell) => sum + cell.laborStock, 0),
       consumerMoney: state.cells.reduce((sum, cell) => sum + cell.consumerMoney, 0),
@@ -241,8 +261,8 @@ export function PriceFieldLogisticsPage() {
           <strong>{totals.logistics}</strong>
           <span>Moved</span>
           <strong>{totals.moved}</strong>
-          <span>Demand</span>
-          <strong>{totals.demand}</strong>
+          <span>Residual</span>
+          <strong>{totals.residualDemand.toFixed(1)}</strong>
           <span>Labor</span>
           <strong>{totals.labor}</strong>
           <span>Center</span>
@@ -256,14 +276,14 @@ export function PriceFieldLogisticsPage() {
               <span>Money</span>
               <span>Product</span>
               <span>Moved</span>
-              <span>Demand</span>
+              <span>Residual</span>
               <span>Labor</span>
             </div>
             <div className="field-agent-row">
               <span><i style={{ background: "#f59e0b" }} />Producer</span>
               <span>{Math.round(state.producerMoney)}</span>
               <span>{totals.producer}</span>
-              <span>-</span>
+              <span>{totals.residualDemand.toFixed(1)}</span>
               <span>-</span>
               <span>-</span>
             </div>
@@ -280,7 +300,7 @@ export function PriceFieldLogisticsPage() {
               <span>{Math.round(totals.consumerMoney)}</span>
               <span>-</span>
               <span>-</span>
-              <span>{totals.demand}</span>
+              <span>-</span>
               <span>{totals.labor}/{totals.population}</span>
             </div>
           </div>
