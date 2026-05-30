@@ -56,6 +56,7 @@ export type PriceFieldOptions = {
   maxChannels?: number;
   // Same-source contributions within this fraction of their best price merge.
   closePriceRatio?: number;
+  movementCost?: (from: FieldCoord, to: FieldCoord) => number;
 };
 
 const DEFAULT_MINIMUM_VOLUME = 0.0001;
@@ -121,6 +122,16 @@ export function fieldNeighbors(state: Pick<PriceFieldState, "width" | "height">,
   })).filter((coord) => coord.x >= 0 && coord.x < state.width && coord.y >= 0 && coord.y < state.height);
 }
 
+function passableNeighbors(
+  state: Pick<PriceFieldState, "width" | "height">,
+  cell: FieldCoord,
+  movementCost?: PriceFieldOptions["movementCost"],
+) {
+  return fieldNeighbors(state, cell)
+    .map((neighbor) => ({ ...neighbor, cost: movementCost?.(cell, neighbor) ?? 1 }))
+    .filter((neighbor) => Number.isFinite(neighbor.cost) && neighbor.cost > 0);
+}
+
 type PendingContribution = {
   sourceId: string;
   parent: FieldCoord | null;
@@ -128,9 +139,24 @@ type PendingContribution = {
   volume: number;
 };
 
-function localSourceContributions(sources: PriceFieldSource[], cell: FieldCoord): PendingContribution[] {
-  return sources
-    .filter((source) => source.active && source.x === cell.x && source.y === cell.y)
+function sourceKey(cell: FieldCoord) {
+  return `${cell.x},${cell.y}`;
+}
+
+function indexSources(sources: PriceFieldSource[]) {
+  const byCell = new Map<string, PriceFieldSource[]>();
+  for (const source of sources) {
+    if (!source.active) continue;
+    const key = sourceKey(source);
+    const cellSources = byCell.get(key) ?? [];
+    cellSources.push(source);
+    byCell.set(key, cellSources);
+  }
+  return byCell;
+}
+
+function localSourceContributions(sourceIndex: Map<string, PriceFieldSource[]>, cell: FieldCoord): PendingContribution[] {
+  return (sourceIndex.get(sourceKey(cell)) ?? [])
     .map((source) => ({
       sourceId: sourceId(source),
       parent: null,
@@ -143,8 +169,9 @@ function incomingContributions(
   state: PriceFieldState,
   cell: FieldCoord,
   excludedIncomingDirection: Direction | null,
+  movementCost?: PriceFieldOptions["movementCost"],
 ): PendingContribution[] {
-  return fieldNeighbors(state, cell).flatMap((neighbor) => {
+  return passableNeighbors(state, cell, movementCost).flatMap((neighbor) => {
     if (neighbor.direction === excludedIncomingDirection) return [];
     return fieldCell(state, neighbor.x, neighbor.y).outgoing[neighbor.opposite].map((message) => ({
       ...message,
@@ -195,10 +222,11 @@ function decayChannels(
   volumeDecay: number,
   volumeShare: number,
   minimumVolume: number,
+  movementCost: number,
 ): PriceFieldChannel[] {
   return channels.flatMap((channel) => {
-    const price = channel.price * priceDecay;
-    const volume = channel.volume * volumeDecay * volumeShare;
+    const price = channel.price * priceDecay ** movementCost;
+    const volume = channel.volume * volumeDecay ** movementCost * volumeShare;
     if (price <= 0 || volume < minimumVolume) return [];
     return [{ ...channel, price, volume, parents: [parent] }];
   });
@@ -224,14 +252,16 @@ export function stepPriceField(
     minimumVolume = DEFAULT_MINIMUM_VOLUME,
     maxChannels = DEFAULT_MAX_CHANNELS,
     closePriceRatio = DEFAULT_CLOSE_PRICE_RATIO,
+    movementCost,
   }: PriceFieldOptions,
 ): PriceFieldState {
+  const sourceIndex = indexSources(sources);
   const nextCells = state.cells.map((cell): PriceFieldCell => {
-    const local = localSourceContributions(sources, cell);
-    const neighbors = fieldNeighbors(state, cell);
+    const local = localSourceContributions(sourceIndex, cell);
+    const neighbors = passableNeighbors(state, cell, movementCost);
     const volumeShare = neighbors.length === 0 ? 0 : 1 / neighbors.length;
     const visibleChannels = mergeContributions(
-      [...local, ...incomingContributions(state, cell, null)],
+      [...local, ...incomingContributions(state, cell, null, movementCost)],
       maxChannels,
       closePriceRatio,
       minimumVolume,
@@ -240,7 +270,7 @@ export function stepPriceField(
     const outgoing = emptyMessages();
     for (const neighbor of neighbors) {
       const messageInputs = mergeContributions(
-        [...local, ...incomingContributions(state, cell, neighbor.direction)],
+        [...local, ...incomingContributions(state, cell, neighbor.direction, movementCost)],
         maxChannels,
         closePriceRatio,
         minimumVolume,
@@ -252,6 +282,7 @@ export function stepPriceField(
         volumeDecay,
         volumeShare,
         minimumVolume,
+        neighbor.cost,
       );
     }
 

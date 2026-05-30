@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  FARM_PRODUCER_AGENT,
   PRODUCER_AGENT,
   accountOfCell,
   addLedgerBalance,
   getLedgerBalance,
   logisticsCell,
   runAuction,
+  setLedgerBalance,
   type PriceLogisticsState,
 } from "./engine";
 import { effectiveProductBid, stepPriceLogistics } from "./agents";
@@ -18,27 +20,43 @@ function emptyState(width = 5, height = 1): PriceLogisticsState {
   state.ledger = {};
   state.money = 50;
   state.producerMoney = 0;
+  state.farmProducerMoney = 0;
   for (const cell of state.cells) {
     cell.localBid = 0;
+    cell.land = true;
+    cell.foodBid = 0;
     cell.consumerMoney = 0;
     cell.population = 0;
+    cell.malnutritionBurden = 0;
+    cell.foodConsumed = 0;
     cell.laborBid = 0;
     cell.laborAsk = 0;
     cell.laborStock = 0;
     cell.fieldBid = 0;
     cell.bidVolume = 0;
+    cell.foodFieldBid = 0;
+    cell.foodBidVolume = 0;
     cell.localAsk = 0;
+    cell.foodAsk = 0;
     cell.producerStock = 0;
+    cell.producerFoodStock = 0;
+    cell.farmProducerFoodStock = 0;
+    cell.farmStock = 0;
     cell.logisticsStock = 0;
+    cell.logisticsFoodStock = 0;
     cell.movedStock = 0;
     cell.lastBidFilled = 0;
     cell.lastBidUnfilled = 0;
+    cell.lastFoodBidFilled = 0;
+    cell.lastFoodBidUnfilled = 0;
     cell.lastLaborBidFilled = 0;
     cell.lastLaborBidUnfilled = 0;
     cell.lastLaborFilled = 0;
     cell.lastLaborUnfilled = 0;
     cell.lastAskFilled = 0;
     cell.lastAskUnfilled = 0;
+    cell.lastFoodAskFilled = 0;
+    cell.lastFoodAskUnfilled = 0;
   }
   return state;
 }
@@ -190,6 +208,21 @@ describe("price-field logistics sim", () => {
     expect(fieldCell(third.bidField, 3, 0).price).toBeGreaterThan(0);
   });
 
+  it("does not propagate price fields or move goods across sea cells", () => {
+    const state = emptyState(3, 1);
+    logisticsCell(state, 1, 0).land = false;
+    logisticsCell(state, 0, 0).logisticsStock = 1;
+    logisticsCell(state, 2, 0).localBid = 30;
+    logisticsCell(state, 2, 0).consumerMoney = 120;
+    logisticsCell(state, 2, 0).population = 4;
+
+    const next = stepTimes(state, 5);
+
+    expect(fieldCell(next.bidFields.product, 0, 0).price).toBe(0);
+    expect(logisticsCell(next, 0, 0).logisticsStock).toBe(1);
+    expect(next.events.some((event) => event.kind === "move")).toBe(false);
+  });
+
   it("raises unfilled consumer bids and lowers filled consumer bids", () => {
     const unfilled = emptyState();
     logisticsCell(unfilled, 0, 0).population = 2;
@@ -316,6 +349,135 @@ describe("price-field logistics sim", () => {
     expect(getLedgerBalance(next.ledger, PRODUCER_AGENT, account, "product")).toBe(3);
   });
 
+  it("runs farm recipes for subsistence food without consuming the farm", () => {
+    const state = emptyState(1, 1);
+    const account = accountOfCell(logisticsCell(state, 0, 0));
+    logisticsCell(state, 0, 0).farmStock = 1;
+    addLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "labor", 1);
+    addLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "farm", 1);
+
+    const next = stepPriceLogistics(state);
+
+    expect(getLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "labor")).toBe(0);
+    expect(getLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "farm")).toBe(1);
+    expect(getLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "food")).toBe(1);
+  });
+
+  it("farm producer buys local labor to run farms when expected food revenue covers input cost", () => {
+    const state = emptyState(1, 1);
+    const account = accountOfCell(logisticsCell(state, 0, 0));
+    state.money = 0;
+    state.farmProducerMoney = 20;
+    state.recipes = [{
+      id: "subsistence-food",
+      inputs: { labor: 1 },
+      requirements: { farm: 1 },
+      outputs: { food: 1 },
+    }];
+    logisticsCell(state, 0, 0).foodBid = 20;
+    logisticsCell(state, 0, 0).foodAsk = 8;
+    logisticsCell(state, 0, 0).population = 1;
+    logisticsCell(state, 0, 0).laborBid = 8;
+    logisticsCell(state, 0, 0).laborAsk = 2;
+    logisticsCell(state, 0, 0).farmStock = 1;
+    addLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "farm", 1);
+
+    const next = stepPriceLogistics(state);
+
+    expect(next.events.some((event) => event.kind === "labor" && event.x === 0 && event.y === 0)).toBe(true);
+    expect(getLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "food")).toBe(1);
+    expect(next.farmProducerMoney).toBeLessThan(state.farmProducerMoney);
+    expect(logisticsCell(next, 0, 0).producerStock).toBe(0);
+  });
+
+  it("runs factory farming with product input and a larger farm requirement", () => {
+    const state = emptyState(1, 1);
+    const account = accountOfCell(logisticsCell(state, 0, 0));
+    logisticsCell(state, 0, 0).farmStock = 2;
+    addLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "labor", 1);
+    addLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "product", 1);
+    addLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "farm", 2);
+
+    const next = stepPriceLogistics(state);
+
+    expect(getLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "labor")).toBe(0);
+    expect(getLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "product")).toBe(0);
+    expect(getLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "farm")).toBe(2);
+    expect(getLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "food")).toBe(3);
+  });
+
+  it("prioritizes consumer food bids before product bids", () => {
+    const state = emptyState(1, 1);
+    const cell = logisticsCell(state, 0, 0);
+    const account = accountOfCell(cell);
+    const consumer = "Consumer-0,0";
+    cell.population = 1;
+    cell.foodBid = 10;
+    cell.localBid = 10;
+    cell.foodAsk = 10;
+    cell.localAsk = 10;
+    cell.consumerMoney = 10;
+    cell.farmProducerFoodStock = 1;
+    cell.logisticsStock = 1;
+    addLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "food", 1);
+
+    const next = stepPriceLogistics(state);
+
+    expect(logisticsCell(next, 0, 0).lastFoodBidFilled).toBe(1);
+    expect(logisticsCell(next, 0, 0).lastBidFilled).toBe(0);
+    expect(getLedgerBalance(next.ledger, consumer, account, "food")).toBe(0);
+    expect(logisticsCell(next, 0, 0).foodConsumed).toBe(1);
+    expect(logisticsCell(next, 0, 0).consumerMoney).toBe(0);
+  });
+
+  it("raises malnutrition burden and mortality when food is missing", () => {
+    const state = emptyState(1, 1);
+    const cell = logisticsCell(state, 0, 0);
+    cell.population = 10;
+    cell.malnutritionBurden = 1;
+
+    const next = stepPriceLogistics(state);
+
+    expect(logisticsCell(next, 0, 0).foodConsumed).toBe(0);
+    expect(logisticsCell(next, 0, 0).malnutritionBurden).toBe(1);
+    expect(logisticsCell(next, 0, 0).population).toBeLessThan(9);
+  });
+
+  it("rejects fractional ledger quantities", () => {
+    const state = emptyState(1, 1);
+    const account = accountOfCell(logisticsCell(state, 0, 0));
+
+    expect(() => addLedgerBalance(state.ledger, PRODUCER_AGENT, account, "food", 0.5)).toThrow(/integer quantity/);
+    expect(() => setLedgerBalance(state.ledger, PRODUCER_AGENT, account, "labor", 1.25)).toThrow(/integer quantity/);
+  });
+
+  it("keeps population-derived labor and food ledger flows integer", () => {
+    const state = emptyState(1, 1);
+    const cell = logisticsCell(state, 0, 0);
+    const account = accountOfCell(cell);
+    const consumer = "Consumer-0,0";
+    cell.population = 2.7;
+    cell.malnutritionBurden = 0.5;
+    addLedgerBalance(state.ledger, consumer, account, "food", 4);
+
+    const next = stepPriceLogistics(state);
+
+    expect(Number.isInteger(getLedgerBalance(next.ledger, consumer, account, "labor"))).toBe(true);
+    expect(Number.isInteger(getLedgerBalance(next.ledger, consumer, account, "food"))).toBe(true);
+  });
+
+  it("floors fractional population before placing product demand orders", () => {
+    const state = emptyState(1, 1);
+    const cell = logisticsCell(state, 0, 0);
+    cell.population = 0.9966214214995466;
+    cell.localBid = 10;
+    cell.consumerMoney = 20;
+    cell.logisticsStock = 1;
+
+    expect(() => stepPriceLogistics(state)).not.toThrow();
+    expect(stepPriceLogistics(state).trades).toHaveLength(0);
+  });
+
   it("allocates producer money to the factory with the larger labor margin first", () => {
     const state = emptyState(2, 1);
     state.money = 0;
@@ -336,7 +498,7 @@ describe("price-field logistics sim", () => {
     const next = stepPriceLogistics(state);
 
     expect(logisticsCell(next, 0, 0).producerStock).toBe(1);
-    expect(logisticsCell(next, 1, 0).producerStock).toBe(0);
+    expect(logisticsCell(next, 1, 0).producerStock).toBe(1);
     expect(next.events.find((event) => event.kind === "labor")).toEqual(expect.objectContaining({ x: 0, y: 0 }));
   });
 

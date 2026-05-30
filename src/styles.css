@@ -671,7 +671,7 @@ canvas {
 .cell-resource-header,
 .cell-resource-row {
   display: grid;
-  grid-template-columns: minmax(68px, 0.8fr) minmax(82px, 1fr) repeat(3, minmax(64px, 0.75fr)) minmax(84px, 1fr) minmax(58px, 0.7fr);
+  grid-template-columns: minmax(68px, 0.8fr) minmax(82px, 1fr) repeat(4, minmax(64px, 0.75fr)) minmax(84px, 1fr) minmax(58px, 0.7fr);
   gap: 8px;
   align-items: center;
 }
