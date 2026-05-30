@@ -20,6 +20,7 @@ import {
   type PriceMarketResource,
   type PriceRecipe,
   type PriceResource,
+  type PriceStepProfiler,
 } from "./engine";
 import type { PriceFieldSource } from "./priceFieldAutomaton";
 import type { Account } from "../shared/types";
@@ -396,7 +397,9 @@ export function policies(state: PriceLogisticsState) {
   return [...createConsumerPolicies(state), producerPolicy, farmProducerPolicy, logisticsPolicy];
 }
 
-export function stepAgentSim(state: Parameters<typeof stepSimEngine>[0]) {
-  return stepSimEngine(state, policies(state), priceCellBehavior);
+export function stepAgentSim(state: Parameters<typeof stepSimEngine>[0], profiler?: PriceStepProfiler) {
+  const startedAt = profiler ? performance.now() : 0;
+  const agentPolicies = policies(state);
+  profiler?.record("createPolicies", performance.now() - startedAt);
+  return stepSimEngine(state, agentPolicies, priceCellBehavior, profiler);
 }
-

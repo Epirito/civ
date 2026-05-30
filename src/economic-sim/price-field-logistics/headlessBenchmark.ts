@@ -114,6 +114,17 @@ function traceEntry(state: PriceLogisticsState): PriceLogisticsBenchmarkTraceEnt
   };
 }
 
+function profiledTraceEntry(
+  state: PriceLogisticsState,
+  profiler: ReturnType<typeof createBenchmarkProfiler> | undefined,
+) {
+  if (!profiler) return traceEntry(state);
+  const startedAt = performance.now();
+  const entry = traceEntry(state);
+  profiler.record("stateHash", performance.now() - startedAt);
+  return entry;
+}
+
 export function summarizePriceLogisticsState(state: PriceLogisticsState) {
   return {
     finalTurn: state.turn,
@@ -137,14 +148,14 @@ export function runPriceLogisticsBenchmark({
 }: PriceLogisticsBenchmarkOptions = {}): PriceLogisticsBenchmarkSummary {
   let state = createPriceLogisticsState(width, height);
   const profiler = profile ? createBenchmarkProfiler() : undefined;
-  const trajectory = trace ? [traceEntry(state)] : undefined;
+  const trajectory = trace ? [profiledTraceEntry(state, profiler)] : undefined;
   const startedAt = performance.now();
 
   for (let turn = 0; turn < turns; turn += 1) {
     const stepStartedAt = performance.now();
-    state = stepAgentSim(state);
+    state = stepAgentSim(state, profiler);
     profiler?.record("stepPriceLogistics", performance.now() - stepStartedAt);
-    trajectory?.push(traceEntry(state));
+    trajectory?.push(profiledTraceEntry(state, profiler));
   }
 
   return {

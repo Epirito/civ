@@ -1,10 +1,10 @@
 {
   "turns": 3,
-  "trajectoryHash": "08dade88258baa87",
+  "trajectoryHash": "1e6c7957d02ea713",
   "trajectory": [
     {
       "turn": 0,
-      "stateHash": "32bedecbae25776f",
+      "stateHash": "3cd100dfe74b5610",
       "nextOrderId": 1,
       "orders": 0,
       "trades": 0,

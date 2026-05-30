@@ -151,6 +151,10 @@ export type PriceFieldBatchStepper = (
   work: PriceFieldStepWork[],
 ) => Promise<Record<PriceLogisticsResource, PriceFieldState>>;
 
+export type PriceStepProfiler = {
+  record: (name: string, durationMs: number) => void;
+};
+
 export type PriceCellBehavior = {
   fieldSources: (state: PriceLogisticsState, resource: PriceLogisticsResource) => PriceFieldSource[];
   afterMarket: (state: PriceLogisticsState) => void;
@@ -199,7 +203,7 @@ function ensureAccount(ledger: PriceLedger, agent: PriceAgent, account: Account)
 }
 
 export function getLedgerBalance(ledger: PriceLedger, agent: PriceAgent, account: Account, resource: PriceResource) {
-  return ensureAccount(ledger, agent, account)[resource] ?? 0;
+  return ledger[agent]?.[account]?.[resource] ?? 0;
 }
 
 export function addLedgerBalance(
@@ -338,24 +342,33 @@ export function parseAccount(account: Account) {
 }
 
 function placeOrder(state: PriceLogisticsState, order: Omit<PriceOrder, "id" | "remaining">) {
-  if (order.quantity <= 0 || order.price < 0) return;
+  if (order.quantity <= 0 || order.price < 0) return null;
   assertIntegerQuantity(order.quantity, `${order.agent} ${order.resource} order quantity`);
   if (order.side === "bid") {
     addLedgerBalance(state.ledger, order.agent, MONEY_ACCOUNT, "money", -order.quantity * order.price);
   } else {
     addLedgerBalance(state.ledger, order.agent, order.account, order.resource, -order.quantity);
   }
-  state.orders.push({ ...order, id: state.nextOrderId, remaining: order.quantity });
+  const placedOrder = { ...order, id: state.nextOrderId, remaining: order.quantity };
+  state.orders.push(placedOrder);
   state.nextOrderId += 1;
+  return placedOrder;
 }
 
 function bestOpenOrder(state: PriceLogisticsState, account: Account, resource: PriceMarketResource, side: "bid" | "ask") {
-  const orders = state.orders.filter(
-    (order) => order.account === account && order.resource === resource && order.side === side && order.remaining > 0,
-  );
-  const best = orders.sort((a, b) => (
-    side === "bid" ? b.price - a.price || a.id - b.id : a.price - b.price || a.id - b.id
-  ))[0];
+  let best: PriceOrder | null = null;
+  for (const order of state.orders) {
+    if (order.account !== account || order.resource !== resource || order.side !== side || order.remaining <= 0) continue;
+    if (!best) {
+      best = order;
+      continue;
+    }
+    if (side === "bid") {
+      if (order.price > best.price || (order.price === best.price && order.id < best.id)) best = order;
+    } else if (order.price < best.price || (order.price === best.price && order.id < best.id)) {
+      best = order;
+    }
+  }
   return best ? { price: best.price, quantity: best.remaining } : null;
 }
 
@@ -506,10 +519,18 @@ function recipeQuantity(resources: Partial<Record<PriceResource, number>>, recip
   return Number.isFinite(quantity) ? quantity : 0;
 }
 
+function agentCanRunRecipe(agent: PriceAgent, recipe: PriceRecipe) {
+  if (agent === PRODUCER_AGENT) return (recipe.requirements.factory ?? 0) > 0;
+  if (agent === FARM_PRODUCER_AGENT) return (recipe.requirements.farm ?? 0) > 0;
+  return false;
+}
+
 function generateProducts(state: PriceLogisticsState) {
   for (const [agent, accounts] of Object.entries(state.ledger) as Array<[PriceAgent, NonNullable<PriceLedger[PriceAgent]>]>) {
+    if (agent !== PRODUCER_AGENT && agent !== FARM_PRODUCER_AGENT) continue;
     for (const [account, resources] of Object.entries(accounts) as Array<[Account, Partial<Record<PriceResource, number>>]>) {
       for (const recipe of state.recipes) {
+        if (!agentCanRunRecipe(agent, recipe)) continue;
         const quantity = recipeQuantity(resources, recipe);
         if (quantity <= 0) continue;
         for (const [resource, amount] of Object.entries(recipe.inputs) as Array<[PriceResource, number]>) {
@@ -559,32 +580,73 @@ function updateFoodAndPopulation(state: PriceLogisticsState) {
 }
 
 function createAgentApi(state: PriceLogisticsState, agent: PriceAgent): PriceAgentApi {
+  let accounts: Account[] | undefined;
+  let bestOrders:
+    | Map<string, { bid?: PriceOrder; ask?: PriceOrder }>
+    | undefined;
+  const orderKey = (account: Account, resource: PriceMarketResource) => `${account}|${resource}`;
+  const isBetterOrder = (order: PriceOrder, current: PriceOrder | undefined) => {
+    if (!current) return true;
+    if (order.side === "bid") return order.price > current.price || (order.price === current.price && order.id < current.id);
+    return order.price < current.price || (order.price === current.price && order.id < current.id);
+  };
+  const ensureBestOrders = () => {
+    if (bestOrders) return bestOrders;
+    bestOrders = new Map();
+    for (const order of state.orders) {
+      if (order.remaining <= 0) continue;
+      const key = orderKey(order.account, order.resource);
+      const entry = bestOrders.get(key) ?? {};
+      if (isBetterOrder(order, entry[order.side])) entry[order.side] = order;
+      bestOrders.set(key, entry);
+    }
+    return bestOrders;
+  };
+  const addIndexedOrder = (order: PriceOrder | null) => {
+    if (!order || !bestOrders) return;
+    const key = orderKey(order.account, order.resource);
+    const entry = bestOrders.get(key) ?? {};
+    if (isBetterOrder(order, entry[order.side])) entry[order.side] = order;
+    bestOrders.set(key, entry);
+  };
+  const moveResource = (resource: PriceLogisticsResource, from: Account, to: Account, value: number) => {
+    const fromCell = cellForAccount(state, from);
+    const toCell = cellForAccount(state, to);
+    if (!fromCell || !toCell) return false;
+    if (!Number.isFinite(travelCost(state, fromCell, toCell))) return false;
+    if (getLedgerBalance(state.ledger, agent, from, resource) < 1) return false;
+    if (getLedgerBalance(state.ledger, agent, MONEY_ACCOUNT, "money") < MOVE_COST) return false;
+    addLedgerBalance(state.ledger, agent, from, resource, -1);
+    addLedgerBalance(state.ledger, agent, MONEY_ACCOUNT, "money", -MOVE_COST);
+    if (resource === "product") toCell.movedStock += 1;
+    else addLedgerBalance(state.ledger, agent, to, resource, 1);
+    state.events.push({ kind: "move", fromX: fromCell.x, fromY: fromCell.y, toX: toCell.x, toY: toCell.y, value });
+    return true;
+  };
   return {
     agent,
     balance: (account, resource) => getLedgerBalance(state.ledger, agent, account, resource),
     balanceOf: (targetAgent, account, resource) => getLedgerBalance(state.ledger, targetAgent, account, resource),
-    accounts: () => state.cells.map(accountOfCell),
-    local: (account) => cellForAccount(state, account),
-    placeBid: (account, resource, price, quantity) => placeOrder(state, { agent, account, resource, side: "bid", price, quantity }),
-    placeAsk: (account, resource, price, quantity) => placeOrder(state, { agent, account, resource, side: "ask", price, quantity }),
-    bestBid: (account, resource) => bestOpenOrder(state, account, resource, "bid"),
-    bestAsk: (account, resource) => bestOpenOrder(state, account, resource, "ask"),
-    recipes: () => state.recipes,
-    moveResource: (resource, from, to, value) => {
-      const fromCell = cellForAccount(state, from);
-      const toCell = cellForAccount(state, to);
-      if (!fromCell || !toCell) return false;
-      if (!Number.isFinite(travelCost(state, fromCell, toCell))) return false;
-      if (getLedgerBalance(state.ledger, agent, from, resource) < 1) return false;
-      if (getLedgerBalance(state.ledger, agent, MONEY_ACCOUNT, "money") < MOVE_COST) return false;
-      addLedgerBalance(state.ledger, agent, from, resource, -1);
-      addLedgerBalance(state.ledger, agent, MONEY_ACCOUNT, "money", -MOVE_COST);
-      if (resource === "product") toCell.movedStock += 1;
-      else addLedgerBalance(state.ledger, agent, to, resource, 1);
-      state.events.push({ kind: "move", fromX: fromCell.x, fromY: fromCell.y, toX: toCell.x, toY: toCell.y, value });
-      return true;
+    accounts: () => {
+      accounts ??= state.cells.map(accountOfCell);
+      return accounts;
     },
-    moveProduct: (from, to, value) => createAgentApi(state, agent).moveResource("product", from, to, value),
+    local: (account) => cellForAccount(state, account),
+    placeBid: (account, resource, price, quantity) =>
+      addIndexedOrder(placeOrder(state, { agent, account, resource, side: "bid", price, quantity })),
+    placeAsk: (account, resource, price, quantity) =>
+      addIndexedOrder(placeOrder(state, { agent, account, resource, side: "ask", price, quantity })),
+    bestBid: (account, resource) => {
+      const best = ensureBestOrders().get(orderKey(account, resource))?.bid;
+      return best ? { price: best.price, quantity: best.remaining } : null;
+    },
+    bestAsk: (account, resource) => {
+      const best = ensureBestOrders().get(orderKey(account, resource))?.ask;
+      return best ? { price: best.price, quantity: best.remaining } : null;
+    },
+    recipes: () => state.recipes,
+    moveResource,
+    moveProduct: (from, to, value) => moveResource("product", from, to, value),
     diffusedBid: (account, resource = "product") => {
       const cell = cellForAccount(state, account);
       return cell ? diffusedBid(state, cell.x, cell.y, resource) : 0;
@@ -598,12 +660,27 @@ function createAgentApi(state: PriceLogisticsState, agent: PriceAgent): PriceAge
   };
 }
 
+function profile<T>(profiler: PriceStepProfiler | undefined, name: string, work: () => T): T {
+  const startedAt = profiler ? performance.now() : 0;
+  const result = work();
+  profiler?.record(name, performance.now() - startedAt);
+  return result;
+}
+
+async function profileAsync<T>(profiler: PriceStepProfiler | undefined, name: string, work: () => Promise<T>): Promise<T> {
+  const startedAt = profiler ? performance.now() : 0;
+  const result = await work();
+  profiler?.record(name, performance.now() - startedAt);
+  return result;
+}
+
 export function stepSimEngine(
   state: PriceLogisticsState,
   policies: PriceAgentPolicy[],
   behavior: PriceCellBehavior,
+  profiler?: PriceStepProfiler,
 ): PriceLogisticsState {
-  const next: PriceLogisticsState = {
+  const next: PriceLogisticsState = profile(profiler, "cloneState", () => ({
     ...state,
     turn: state.turn + 1,
     nextOrderId: state.nextOrderId,
@@ -613,44 +690,63 @@ export function stepSimEngine(
     lastOrderResults: [],
     trades: [],
     events: [],
-  };
+  }));
   setLedgerBalance(next.ledger, LOGISTICS_AGENT, MONEY_ACCOUNT, "money", state.money);
   setLedgerBalance(next.ledger, PRODUCER_AGENT, MONEY_ACCOUNT, "money", state.producerMoney);
   setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, MONEY_ACCOUNT, "money", state.farmProducerMoney);
 
-  for (const cell of next.cells) {
-    const account = accountOfCell(cell);
-    const consumer = consumerAgentForCell(cell);
-    setLedgerBalance(next.ledger, consumer, MONEY_ACCOUNT, "money", cell.consumerMoney);
-    setLedgerBalance(next.ledger, consumer, account, "labor", cell.laborStock);
-    setLedgerBalance(next.ledger, PRODUCER_AGENT, account, "product", cell.producerStock);
-    setLedgerBalance(next.ledger, PRODUCER_AGENT, account, "food", cell.producerFoodStock);
-    setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "food", cell.farmProducerFoodStock);
-    setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "farm", cell.farmStock);
-    setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "product", cell.logisticsStock);
-    setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "food", cell.logisticsFoodStock);
-    Object.assign(cell, behavior.adaptCell(cell));
-    const labor = getLedgerBalance(next.ledger, consumer, account, "labor");
-    const generatedLabor = Math.floor(cell.population * laborProductivity(cell));
-    setLedgerBalance(next.ledger, consumer, account, "labor", Math.min(12, labor + generatedLabor));
-    const moved = cell.movedStock;
-    if (moved > 0) addLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "product", moved);
-    cell.movedStock = 0;
-  }
-  refreshCellBalances(next);
-  next.bidFields = stepPriceFieldsSync(priceFieldStepWork(next, behavior));
+  profile(profiler, "syncLedgerAndCells", () => {
+    for (const cell of next.cells) {
+      const account = accountOfCell(cell);
+      const consumer = consumerAgentForCell(cell);
+      setLedgerBalance(next.ledger, consumer, MONEY_ACCOUNT, "money", cell.consumerMoney);
+      setLedgerBalance(next.ledger, consumer, account, "labor", cell.laborStock);
+      setLedgerBalance(next.ledger, PRODUCER_AGENT, account, "product", cell.producerStock);
+      setLedgerBalance(next.ledger, PRODUCER_AGENT, account, "food", cell.producerFoodStock);
+      setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "food", cell.farmProducerFoodStock);
+      setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "farm", cell.farmStock);
+      setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "product", cell.logisticsStock);
+      setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "food", cell.logisticsFoodStock);
+      Object.assign(cell, behavior.adaptCell(cell));
+      const labor = getLedgerBalance(next.ledger, consumer, account, "labor");
+      const generatedLabor = Math.floor(cell.population * laborProductivity(cell));
+      setLedgerBalance(next.ledger, consumer, account, "labor", Math.min(12, labor + generatedLabor));
+      const moved = cell.movedStock;
+      if (moved > 0) addLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "product", moved);
+      cell.movedStock = 0;
+    }
+  });
+  profile(profiler, "refreshBeforeFields", () => refreshCellBalances(next));
+  next.bidFields = profile(profiler, "priceFields", () => stepPriceFieldsSync(priceFieldStepWork(next, behavior)));
   next.bidField = next.bidFields.product;
 
-  for (const policy of policies) {
-    policy.run(createAgentApi(next, policy.agent));
-  }
+  profile(profiler, "policies", () => {
+    let consumerPolicyStartedAt = profiler ? performance.now() : 0;
+    let consumerPolicyOpen = false;
+    for (const policy of policies) {
+      if (policy.agent.startsWith("Consumer-")) {
+        consumerPolicyOpen = true;
+        policy.run(createAgentApi(next, policy.agent));
+        continue;
+      }
+      if (consumerPolicyOpen) {
+        profiler?.record("policy:Consumers", performance.now() - consumerPolicyStartedAt);
+        consumerPolicyOpen = false;
+      }
+      profile(profiler, `policy:${policy.agent}`, () => policy.run(createAgentApi(next, policy.agent)));
+      consumerPolicyStartedAt = profiler ? performance.now() : 0;
+    }
+    if (consumerPolicyOpen) {
+      profiler?.record("policy:Consumers", performance.now() - consumerPolicyStartedAt);
+    }
+  });
 
-  clearLocalAuctions(next, ["labor", "product", "food"]);
-  syncTradeEffects(next);
-  generateProducts(next);
-  updateFoodAndPopulation(next);
-  behavior.afterMarket(next);
-  refreshCellBalances(next);
+  profile(profiler, "clearLocalAuctions", () => clearLocalAuctions(next, ["labor", "product", "food"]));
+  profile(profiler, "syncTradeEffects", () => syncTradeEffects(next));
+  profile(profiler, "generateProducts", () => generateProducts(next));
+  profile(profiler, "foodAndPopulation", () => updateFoodAndPopulation(next));
+  profile(profiler, "afterMarket", () => behavior.afterMarket(next));
+  profile(profiler, "refreshAfterMarket", () => refreshCellBalances(next));
   return next;
 }
 
@@ -659,8 +755,9 @@ export async function stepSimAsync(
   policies: PriceAgentPolicy[],
   behavior: PriceCellBehavior,
   stepPriceFields: PriceFieldBatchStepper,
+  profiler?: PriceStepProfiler,
 ): Promise<PriceLogisticsState> {
-  const next: PriceLogisticsState = {
+  const next: PriceLogisticsState = profile(profiler, "cloneState", () => ({
     ...state,
     turn: state.turn + 1,
     nextOrderId: state.nextOrderId,
@@ -670,44 +767,63 @@ export async function stepSimAsync(
     lastOrderResults: [],
     trades: [],
     events: [],
-  };
+  }));
   setLedgerBalance(next.ledger, LOGISTICS_AGENT, MONEY_ACCOUNT, "money", state.money);
   setLedgerBalance(next.ledger, PRODUCER_AGENT, MONEY_ACCOUNT, "money", state.producerMoney);
   setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, MONEY_ACCOUNT, "money", state.farmProducerMoney);
 
-  for (const cell of next.cells) {
-    const account = accountOfCell(cell);
-    const consumer = consumerAgentForCell(cell);
-    setLedgerBalance(next.ledger, consumer, MONEY_ACCOUNT, "money", cell.consumerMoney);
-    setLedgerBalance(next.ledger, consumer, account, "labor", cell.laborStock);
-    setLedgerBalance(next.ledger, PRODUCER_AGENT, account, "product", cell.producerStock);
-    setLedgerBalance(next.ledger, PRODUCER_AGENT, account, "food", cell.producerFoodStock);
-    setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "food", cell.farmProducerFoodStock);
-    setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "farm", cell.farmStock);
-    setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "product", cell.logisticsStock);
-    setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "food", cell.logisticsFoodStock);
-    Object.assign(cell, behavior.adaptCell(cell));
-    const labor = getLedgerBalance(next.ledger, consumer, account, "labor");
-    const generatedLabor = Math.floor(cell.population * laborProductivity(cell));
-    setLedgerBalance(next.ledger, consumer, account, "labor", Math.min(12, labor + generatedLabor));
-    const moved = cell.movedStock;
-    if (moved > 0) addLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "product", moved);
-    cell.movedStock = 0;
-  }
-  refreshCellBalances(next);
-  next.bidFields = await stepPriceFields(priceFieldStepWork(next, behavior));
+  profile(profiler, "syncLedgerAndCells", () => {
+    for (const cell of next.cells) {
+      const account = accountOfCell(cell);
+      const consumer = consumerAgentForCell(cell);
+      setLedgerBalance(next.ledger, consumer, MONEY_ACCOUNT, "money", cell.consumerMoney);
+      setLedgerBalance(next.ledger, consumer, account, "labor", cell.laborStock);
+      setLedgerBalance(next.ledger, PRODUCER_AGENT, account, "product", cell.producerStock);
+      setLedgerBalance(next.ledger, PRODUCER_AGENT, account, "food", cell.producerFoodStock);
+      setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "food", cell.farmProducerFoodStock);
+      setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "farm", cell.farmStock);
+      setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "product", cell.logisticsStock);
+      setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "food", cell.logisticsFoodStock);
+      Object.assign(cell, behavior.adaptCell(cell));
+      const labor = getLedgerBalance(next.ledger, consumer, account, "labor");
+      const generatedLabor = Math.floor(cell.population * laborProductivity(cell));
+      setLedgerBalance(next.ledger, consumer, account, "labor", Math.min(12, labor + generatedLabor));
+      const moved = cell.movedStock;
+      if (moved > 0) addLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "product", moved);
+      cell.movedStock = 0;
+    }
+  });
+  profile(profiler, "refreshBeforeFields", () => refreshCellBalances(next));
+  next.bidFields = await profileAsync(profiler, "priceFields", () => stepPriceFields(priceFieldStepWork(next, behavior)));
   next.bidField = next.bidFields.product;
 
-  for (const policy of policies) {
-    policy.run(createAgentApi(next, policy.agent));
-  }
+  profile(profiler, "policies", () => {
+    let consumerPolicyStartedAt = profiler ? performance.now() : 0;
+    let consumerPolicyOpen = false;
+    for (const policy of policies) {
+      if (policy.agent.startsWith("Consumer-")) {
+        consumerPolicyOpen = true;
+        policy.run(createAgentApi(next, policy.agent));
+        continue;
+      }
+      if (consumerPolicyOpen) {
+        profiler?.record("policy:Consumers", performance.now() - consumerPolicyStartedAt);
+        consumerPolicyOpen = false;
+      }
+      profile(profiler, `policy:${policy.agent}`, () => policy.run(createAgentApi(next, policy.agent)));
+      consumerPolicyStartedAt = profiler ? performance.now() : 0;
+    }
+    if (consumerPolicyOpen) {
+      profiler?.record("policy:Consumers", performance.now() - consumerPolicyStartedAt);
+    }
+  });
 
-  clearLocalAuctions(next, ["labor", "product", "food"]);
-  syncTradeEffects(next);
-  generateProducts(next);
-  updateFoodAndPopulation(next);
-  behavior.afterMarket(next);
-  refreshCellBalances(next);
+  profile(profiler, "clearLocalAuctions", () => clearLocalAuctions(next, ["labor", "product", "food"]));
+  profile(profiler, "syncTradeEffects", () => syncTradeEffects(next));
+  profile(profiler, "generateProducts", () => generateProducts(next));
+  profile(profiler, "foodAndPopulation", () => updateFoodAndPopulation(next));
+  profile(profiler, "afterMarket", () => behavior.afterMarket(next));
+  profile(profiler, "refreshAfterMarket", () => refreshCellBalances(next));
   return next;
 }
 
