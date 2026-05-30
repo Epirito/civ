@@ -1,15 +1,8 @@
 import { AGENTS } from "./constants";
 import type { Account, Agent, CellBalance, Coord, Ledger, Resource } from "./types";
+import { accountOf, parseAccount } from "../shared/accounts";
 
-export function accountOf(x: number, y: number): Account {
-  return `${x},${y}`;
-}
-
-export function parseAccount(account: Account): Coord | null {
-  if (account === "") return null;
-  const [x, y] = account.split(",").map(Number);
-  return Number.isInteger(x) && Number.isInteger(y) ? { x, y } : null;
-}
+export { accountOf, parseAccount };
 
 /**
  * Ledger quantities are modeled as non-negative safe integers only. This guard

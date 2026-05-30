@@ -1,8 +1,15 @@
-export type ConsumerAgent = `Consumer-${number},${number}`;
-export type LogisticsAgent = `Logistics-${number}`;
-export type ElectricityLogisticsAgent = "ElectricityLogistics";
-export type Agent = "Common" | "Producer" | LogisticsAgent | ElectricityLogisticsAgent | ConsumerAgent;
-export type AgentFamily = "Common" | "Producer" | "Consumer" | "Logistics" | "ElectricityLogistics";
+import type { Account, Agent, Coord } from "../shared/types";
+
+export type {
+  Account,
+  Agent,
+  AgentFamily,
+  ConsumerAgent,
+  Coord,
+  ElectricityLogisticsAgent,
+  LogisticsAgent,
+} from "../shared/types";
+
 export type Resource =
   | "money"
   | "widget"
@@ -16,13 +23,7 @@ export type Resource =
   | "power-line"
   | "power-plant";
 export type MarketResource = "widget" | "labor" | "electricity";
-export type Account = "" | `${number},${number}`;
 export type Side = "bid" | "ask";
-
-export type Coord = {
-  x: number;
-  y: number;
-};
 
 export type CellBalance = Coord & { account: Account; amount: number };
 

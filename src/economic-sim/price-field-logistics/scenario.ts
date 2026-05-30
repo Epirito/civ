@@ -1,4 +1,4 @@
-import { createPriceFieldState } from "../priceFieldAutomaton";
+import { createPriceFieldState } from "./priceFieldAutomaton";
 import {
   LOGISTICS_AGENT,
   MONEY_ACCOUNT,

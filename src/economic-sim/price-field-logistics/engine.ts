@@ -4,8 +4,8 @@ import {
   stepPriceField,
   type PriceFieldSource,
   type PriceFieldState,
-} from "../priceFieldAutomaton";
-import type { Account, Agent } from "../types";
+} from "./priceFieldAutomaton";
+import type { Account, Agent } from "../shared/types";
 
 export type PriceResource = "money" | "product" | "labor" | "factory";
 export type PriceMarketResource = "product" | "labor";

@@ -1,5 +1,5 @@
-export { EconomicSimPage } from "./EconomicSimPage";
-export { PriceFieldExperimentPage } from "./PriceFieldExperimentPage";
+export { EconomicSimPage } from "./logistics-at-a-distance/EconomicSimPage";
+export { PriceFieldExperimentPage } from "./price-field-logistics/PriceFieldExperimentPage";
 export { PriceFieldLogisticsPage } from "./price-field-logistics";
-export { TileAesthetic3DPage } from "./TileAesthetic3DPage";
-export { TileAestheticPage } from "./TileAestheticPage";
+export { TileAesthetic3DPage } from "./logistics-at-a-distance/TileAesthetic3DPage";
+export { TileAestheticPage } from "./logistics-at-a-distance/TileAestheticPage";

@@ -18,8 +18,8 @@ import {
   type PriceRecipe,
   type PriceResource,
 } from "./engine";
-import type { PriceFieldSource } from "../priceFieldAutomaton";
-import type { Account } from "../types";
+import type { PriceFieldSource } from "./priceFieldAutomaton";
+import type { Account } from "../shared/types";
 
 const LOGISTICS_DEMAND_ALPHA = 0.35;
 const LOGISTICS_DEMAND_DECAY = 0.9;

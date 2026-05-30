@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "tsc && vite build",
     "test": "vitest run",
-    "benchmark:economic-sim": "vitest run --testTimeout 120000 src/economic-sim/headlessBenchmark.test.ts",
+    "benchmark:economic-sim": "vitest run --testTimeout 120000 src/economic-sim/logistics-at-a-distance/headlessBenchmark.test.ts",
     "preview": "vite preview --host 0.0.0.0",
     "download:data": "node scripts/download-data.mjs"
   },

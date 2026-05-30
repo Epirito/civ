@@ -10,8 +10,8 @@ import {
 } from "./engine";
 import { effectiveProductBid, stepPriceLogistics } from "./agents";
 import { createPriceLogisticsState } from "./scenario";
-import { accountOf } from "../ledger";
-import { fieldCell } from "../priceFieldAutomaton";
+import { accountOf } from "../shared/accounts";
+import { fieldCell } from "./priceFieldAutomaton";
 
 function emptyState(width = 5, height = 1): PriceLogisticsState {
   const state = createPriceLogisticsState(width, height);

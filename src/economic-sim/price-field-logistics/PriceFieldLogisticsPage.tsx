@@ -14,10 +14,10 @@ import {
   type PriceLogisticsState,
   type PriceResource,
 } from "./engine";
-import type { Account } from "../types";
+import type { Account } from "../shared/types";
 import { effectiveProductBid, stepPriceLogistics } from "./agents";
 import { createPriceLogisticsState } from "./scenario";
-import { fieldCell } from "../priceFieldAutomaton";
+import { fieldCell } from "./priceFieldAutomaton";
 
 function drawLogistics(canvas: HTMLCanvasElement, state: PriceLogisticsState) {
   const parent = canvas.parentElement;

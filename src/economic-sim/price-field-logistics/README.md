@@ -1,9 +1,5 @@
 # Price-Field Logistics Experiment
 
-This folder is a separate prototype for testing price-field-driven logistics in
-a small labor/product economy. It is not the same model as the main
-`economic-sim` engine.
-
 The experiment asks whether local product bids can propagate as a spatial price
 field, and whether logistics can move goods one tile at a time along that field
 while producers and consumers keep using ordinary local markets.
