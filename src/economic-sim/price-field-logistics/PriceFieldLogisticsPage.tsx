@@ -16,7 +16,7 @@ import {
   type PriceResource,
 } from "./engine";
 import type { Account } from "../shared/types";
-import { effectiveProductBid, stepPriceLogistics } from "./agents";
+import { effectiveProductBid, stepAgentSim} from "./agents";
 import { createPriceLogisticsState } from "./scenario";
 import { fieldCell } from "./priceFieldAutomaton";
 
@@ -264,6 +264,8 @@ export function PriceFieldLogisticsPage() {
   const [fast, setFast] = useState(false);
   const [heatmap, setHeatmap] = useState<HeatmapMode>("price:product");
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
+  const stateRef = useRef(state);
+  const steppingRef = useRef(false);
 
   const totals = useMemo(
     () => ({
@@ -285,6 +287,10 @@ export function PriceFieldLogisticsPage() {
   const hoveredCell = hover ? logisticsCell(state, hover.x, hover.y) : null;
 
   useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
     drawLogistics(canvas, state, heatmap);
@@ -294,28 +300,46 @@ export function PriceFieldLogisticsPage() {
   }, [heatmap, state]);
 
   useEffect(() => {
-    if (!running) return undefined;
-    if (fast) {
-      let frame = 0;
-      const runFrame = () => {
-        setState((current) => {
-          let next = current;
-          const startedAt = performance.now();
-          let steps = 0;
-          while (performance.now() - startedAt < 12 && steps < 100) {
-            next = stepPriceLogistics(next);
-            steps += 1;
-          }
-          return next;
-        });
-        frame = window.requestAnimationFrame(runFrame);
-      };
-      frame = window.requestAnimationFrame(runFrame);
-      return () => window.cancelAnimationFrame(frame);
+  if (!running) return undefined;
+
+  let cancelled = false;
+  let timer: number | undefined;
+
+  const run = async () => {
+    if (steppingRef.current) return;
+
+    steppingRef.current = true;
+    try {
+      const next = await stepAgentSim(
+        stateRef.current,
+      );
+
+      if (!cancelled) {
+        stateRef.current = next;
+        setState(next);
+      }
+    } finally {
+      steppingRef.current = false;
     }
-    const timer = window.setInterval(() => setState((current) => stepPriceLogistics(current)), 450);
-    return () => window.clearInterval(timer);
-  }, [fast, running]);
+
+    if (!cancelled) {
+      if (fast) {
+        timer = window.setTimeout(run, 0);
+      } else {
+        timer = window.setTimeout(run, 450);
+      }
+    }
+  };
+
+  void run();
+
+  return () => {
+    cancelled = true;
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+    }
+  };
+}, [fast, running]);
 
   return (
     <main className="field-experiment-app">
@@ -326,7 +350,7 @@ export function PriceFieldLogisticsPage() {
         </section>
         <section className="field-buttons" aria-label="Simulation controls">
           <button onClick={() => setRunning((current) => !current)}>{running ? <Pause size={18} /> : <Play size={18} />}</button>
-          <button onClick={() => setState((current) => stepPriceLogistics(current))}>
+          <button onClick={() => setState((current) => stepAgentSim(current))}>
             <SkipForward size={18} />
           </button>
           <button className={fast ? "active" : ""} onClick={() => setFast((current) => !current)} title="Run fast">

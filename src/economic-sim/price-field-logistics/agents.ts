@@ -8,8 +8,9 @@ import {
   MOVE_COST,
   PRODUCER_AGENT,
   accountOfCell,
+  stepSimAsync as stepEngineAsync,
   consumerAgentForCell,
-  stepPriceLogistics as stepPriceLogisticsEngine,
+  stepSimEngine,
   type PriceAgentApi,
   type PriceAgentPolicy,
   type PriceCellBehavior,
@@ -391,10 +392,11 @@ export const logisticsPolicy: PriceAgentPolicy = {
   },
 };
 
-export function priceLogisticsPolicies(state: PriceLogisticsState) {
+export function policies(state: PriceLogisticsState) {
   return [...createConsumerPolicies(state), producerPolicy, farmProducerPolicy, logisticsPolicy];
 }
 
-export function stepPriceLogistics(state: Parameters<typeof stepPriceLogisticsEngine>[0]) {
-  return stepPriceLogisticsEngine(state, priceLogisticsPolicies(state), priceCellBehavior);
+export function stepAgentSim(state: Parameters<typeof stepSimEngine>[0]) {
+  return stepSimEngine(state, policies(state), priceCellBehavior);
 }
+

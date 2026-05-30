@@ -138,6 +138,19 @@ export type PriceAgentPolicy = {
   run: (api: PriceAgentApi) => void;
 };
 
+export type PriceFieldStepWork = {
+  resource: PriceLogisticsResource;
+  field: PriceFieldState;
+  sources: PriceFieldSource[];
+  land: boolean[];
+  width: number;
+  height: number;
+};
+
+export type PriceFieldBatchStepper = (
+  work: PriceFieldStepWork[],
+) => Promise<Record<PriceLogisticsResource, PriceFieldState>>;
+
 export type PriceCellBehavior = {
   fieldSources: (state: PriceLogisticsState, resource: PriceLogisticsResource) => PriceFieldSource[];
   afterMarket: (state: PriceLogisticsState) => void;
@@ -264,14 +277,40 @@ export function refreshCellBalances(state: PriceLogisticsState) {
   }
 }
 
-function stepBidField(state: PriceLogisticsState, behavior: PriceCellBehavior, resource: PriceLogisticsResource) {
-  return stepPriceField(state.bidFields[resource], behavior.fieldSources(state, resource), {
+function priceFieldOptions(land: boolean[], width: number) {
+  return {
     priceDecay: 0.9,
     volumeDecay: 0.96,
     closePriceRatio: 0.9,
     minimumVolume: 0.0005,
-    movementCost: (from, to) => travelCost(state, from, to),
-  });
+    movementCost: (from: { x: number; y: number }, to: { x: number; y: number }) =>
+      land[from.y * width + from.x] && land[to.y * width + to.x] ? 1 : SEA_TRAVEL_COST,
+  };
+}
+
+function landMask(state: PriceLogisticsState) {
+  return state.cells.map((cell) => cell.land);
+}
+
+function priceFieldStepWork(state: PriceLogisticsState, behavior: PriceCellBehavior): PriceFieldStepWork[] {
+  const land = landMask(state);
+  return state.logisticsResources.map((resource) => ({
+    resource,
+    field: state.bidFields[resource],
+    sources: behavior.fieldSources(state, resource),
+    land,
+    width: state.width,
+    height: state.height,
+  }));
+}
+
+export function stepPriceFieldsSync(work: PriceFieldStepWork[]) {
+  return Object.fromEntries(
+    work.map(({ resource, field, sources, land, width }) => [
+      resource,
+      stepPriceField(field, sources, priceFieldOptions(land, width)),
+    ]),
+  ) as Record<PriceLogisticsResource, PriceFieldState>;
 }
 
 export function diffusedBid(state: PriceLogisticsState, x: number, y: number, resource: PriceLogisticsResource = "product") {
@@ -559,7 +598,7 @@ function createAgentApi(state: PriceLogisticsState, agent: PriceAgent): PriceAge
   };
 }
 
-export function stepPriceLogistics(
+export function stepSimEngine(
   state: PriceLogisticsState,
   policies: PriceAgentPolicy[],
   behavior: PriceCellBehavior,
@@ -599,9 +638,64 @@ export function stepPriceLogistics(
     cell.movedStock = 0;
   }
   refreshCellBalances(next);
-  next.bidFields = Object.fromEntries(
-    next.logisticsResources.map((resource) => [resource, stepBidField(next, behavior, resource)]),
-  ) as Record<PriceLogisticsResource, PriceFieldState>;
+  next.bidFields = stepPriceFieldsSync(priceFieldStepWork(next, behavior));
+  next.bidField = next.bidFields.product;
+
+  for (const policy of policies) {
+    policy.run(createAgentApi(next, policy.agent));
+  }
+
+  clearLocalAuctions(next, ["labor", "product", "food"]);
+  syncTradeEffects(next);
+  generateProducts(next);
+  updateFoodAndPopulation(next);
+  behavior.afterMarket(next);
+  refreshCellBalances(next);
+  return next;
+}
+
+export async function stepSimAsync(
+  state: PriceLogisticsState,
+  policies: PriceAgentPolicy[],
+  behavior: PriceCellBehavior,
+  stepPriceFields: PriceFieldBatchStepper,
+): Promise<PriceLogisticsState> {
+  const next: PriceLogisticsState = {
+    ...state,
+    turn: state.turn + 1,
+    nextOrderId: state.nextOrderId,
+    ledger: cloneLedger(state.ledger),
+    cells: state.cells.map((cell) => ({ ...cell })),
+    orders: [],
+    lastOrderResults: [],
+    trades: [],
+    events: [],
+  };
+  setLedgerBalance(next.ledger, LOGISTICS_AGENT, MONEY_ACCOUNT, "money", state.money);
+  setLedgerBalance(next.ledger, PRODUCER_AGENT, MONEY_ACCOUNT, "money", state.producerMoney);
+  setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, MONEY_ACCOUNT, "money", state.farmProducerMoney);
+
+  for (const cell of next.cells) {
+    const account = accountOfCell(cell);
+    const consumer = consumerAgentForCell(cell);
+    setLedgerBalance(next.ledger, consumer, MONEY_ACCOUNT, "money", cell.consumerMoney);
+    setLedgerBalance(next.ledger, consumer, account, "labor", cell.laborStock);
+    setLedgerBalance(next.ledger, PRODUCER_AGENT, account, "product", cell.producerStock);
+    setLedgerBalance(next.ledger, PRODUCER_AGENT, account, "food", cell.producerFoodStock);
+    setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "food", cell.farmProducerFoodStock);
+    setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "farm", cell.farmStock);
+    setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "product", cell.logisticsStock);
+    setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "food", cell.logisticsFoodStock);
+    Object.assign(cell, behavior.adaptCell(cell));
+    const labor = getLedgerBalance(next.ledger, consumer, account, "labor");
+    const generatedLabor = Math.floor(cell.population * laborProductivity(cell));
+    setLedgerBalance(next.ledger, consumer, account, "labor", Math.min(12, labor + generatedLabor));
+    const moved = cell.movedStock;
+    if (moved > 0) addLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "product", moved);
+    cell.movedStock = 0;
+  }
+  refreshCellBalances(next);
+  next.bidFields = await stepPriceFields(priceFieldStepWork(next, behavior));
   next.bidField = next.bidFields.product;
 
   for (const policy of policies) {

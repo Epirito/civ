@@ -6,5 +6,5 @@ export {
   type PriceLogisticsEvent,
   type PriceLogisticsState,
 } from "./engine";
-export { effectiveProductBid, stepPriceLogistics } from "./agents";
+export { effectiveProductBid, stepAgentSim as stepPriceLogistics } from "./agents";
 export { createPriceLogisticsState } from "./scenario";

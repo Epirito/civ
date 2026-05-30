@@ -1,8 +1,29 @@
+// @ts-expect-error Node fs is available under Vitest; the app build does not ship this test.
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { runPriceLogisticsBenchmark } from "./headlessBenchmark";
+import { type PriceLogisticsBenchmarkSummary, runPriceLogisticsBenchmark } from "./headlessBenchmark";
 import { createPriceLogisticsState } from "./scenario";
 
+const EXPECTED_SUMMARY_URL = new URL("./headlessBenchmark.expected.json", import.meta.url);
+
+function stableSummary(summary: PriceLogisticsBenchmarkSummary) {
+  const { elapsedMs: _elapsedMs, profile: _profile, ...stable } = summary;
+  return stable;
+}
+
 describe("price-field logistics benchmark", () => {
+  it("matches the saved deterministic benchmark trajectory", () => {
+    const summary = stableSummary(runPriceLogisticsBenchmark({ turns: 3, trace: true }));
+    const serialized = `${JSON.stringify(summary, null, 2)}\n`;
+
+    if (!existsSync(EXPECTED_SUMMARY_URL)) {
+      writeFileSync(EXPECTED_SUMMARY_URL, serialized);
+      console.info(`created benchmark expectation at ${EXPECTED_SUMMARY_URL.pathname}`);
+    }
+
+    expect(JSON.parse(readFileSync(EXPECTED_SUMMARY_URL, "utf8"))).toEqual(summary);
+  }, 120_000);
+
   it("runs the world scenario headlessly", () => {
     const summary = runPriceLogisticsBenchmark({ turns: 1, profile: true });
 

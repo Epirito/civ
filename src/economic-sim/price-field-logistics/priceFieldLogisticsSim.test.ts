@@ -10,7 +10,7 @@ import {
   setLedgerBalance,
   type PriceLogisticsState,
 } from "./engine";
-import { effectiveProductBid, stepPriceLogistics } from "./agents";
+import { effectiveProductBid, stepAgentSim } from "./agents";
 import { createPriceLogisticsState } from "./scenario";
 import { accountOf } from "../shared/accounts";
 import { fieldCell } from "./priceFieldAutomaton";
@@ -64,7 +64,7 @@ function emptyState(width = 5, height = 1): PriceLogisticsState {
 function stepTimes(state: PriceLogisticsState, count: number) {
   let current = state;
   for (let step = 0; step < count; step += 1) {
-    current = stepPriceLogistics(current);
+    current = stepAgentSim(current);
   }
   return current;
 }
@@ -92,7 +92,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(state, 4, 0).population = 4;
 
     const first = stepTimes(state, 5);
-    const second = stepPriceLogistics(first);
+    const second = stepAgentSim(first);
 
     expect(logisticsCell(first, 1, 0).movedStock).toBe(1);
     expect(logisticsCell(first, 2, 0).movedStock).toBe(0);
@@ -125,7 +125,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(state, 4, 0).consumerMoney = 120;
     logisticsCell(state, 4, 0).population = 4;
 
-    const next = stepPriceLogistics(state);
+    const next = stepAgentSim(state);
 
     expect(next.events.filter((event) => event.kind === "buy" || event.kind === "move")).toHaveLength(0);
     expect(logisticsCell(next, 0, 0).logisticsStock).toBe(1);
@@ -139,7 +139,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(state, 2, 0).population = 1;
     logisticsCell(state, 2, 0).logisticsStock = 1;
 
-    const next = stepPriceLogistics(state);
+    const next = stepAgentSim(state);
 
     expect(next.events.some((event) => event.kind === "sell" && event.x === 2 && event.y === 0)).toBe(true);
     expect(next.money).toBeGreaterThan(state.money);
@@ -155,7 +155,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(state, 2, 0).population = 3;
     logisticsCell(state, 2, 0).logisticsStock = 3;
 
-    const next = stepPriceLogistics(state);
+    const next = stepAgentSim(state);
 
     expect(logisticsCell(next, 2, 0).lastBidFilled).toBe(0);
     expect(logisticsCell(next, 2, 0).bidVolume).toBe(0);
@@ -168,7 +168,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(state, 2, 0).consumerMoney = 25;
     logisticsCell(state, 2, 0).population = 4;
 
-    const next = stepPriceLogistics(state);
+    const next = stepAgentSim(state);
 
     expect(logisticsCell(next, 2, 0).fieldBid).toBeGreaterThan(0);
     expect(logisticsCell(next, 2, 0).bidVolume).toBeCloseTo(0.7);
@@ -181,7 +181,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(state, 2, 0).population = 3;
     logisticsCell(state, 2, 0).logisticsStock = 1;
 
-    const next = stepPriceLogistics(state);
+    const next = stepAgentSim(state);
 
     expect(logisticsCell(next, 2, 0).lastBidFilled).toBe(1);
     expect(logisticsCell(next, 2, 0).consumerMoney).toBe(0);
@@ -195,9 +195,9 @@ describe("price-field logistics sim", () => {
     logisticsCell(state, 4, 0).consumerMoney = 12;
     logisticsCell(state, 4, 0).population = 1;
 
-    const first = stepPriceLogistics(state);
-    const second = stepPriceLogistics(first);
-    const third = stepPriceLogistics(second);
+    const first = stepAgentSim(state);
+    const second = stepAgentSim(first);
+    const third = stepAgentSim(second);
 
     expect(first.bidField.turn).toBe(state.bidField.turn + 1);
     expect(second.bidField.turn).toBe(first.bidField.turn + 1);
@@ -229,7 +229,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(unfilled, 0, 0).localBid = 10;
     logisticsCell(unfilled, 0, 0).lastBidUnfilled = 2;
 
-    const raised = stepPriceLogistics(unfilled);
+    const raised = stepAgentSim(unfilled);
     expect(logisticsCell(raised, 0, 0).localBid).toBe(12);
 
     const filled = emptyState();
@@ -237,7 +237,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(filled, 0, 0).localBid = 10;
     logisticsCell(filled, 0, 0).lastBidFilled = 1;
 
-    const lowered = stepPriceLogistics(filled);
+    const lowered = stepAgentSim(filled);
     expect(logisticsCell(lowered, 0, 0).localBid).toBe(8);
   });
 
@@ -246,14 +246,14 @@ describe("price-field logistics sim", () => {
     logisticsCell(missed, 0, 0).localAsk = 10;
     logisticsCell(missed, 0, 0).lastAskUnfilled = 1;
 
-    const lowered = stepPriceLogistics(missed);
+    const lowered = stepAgentSim(missed);
     expect(logisticsCell(lowered, 0, 0).localAsk).toBe(9);
 
     const filled = emptyState();
     logisticsCell(filled, 0, 0).localAsk = 10;
     logisticsCell(filled, 0, 0).lastAskFilled = 1;
 
-    const raised = stepPriceLogistics(filled);
+    const raised = stepAgentSim(filled);
     expect(logisticsCell(raised, 0, 0).localAsk).toBe(12);
   });
 
@@ -263,7 +263,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(missed, 0, 0).laborAsk = 10;
     logisticsCell(missed, 0, 0).lastLaborUnfilled = 1;
 
-    const lowered = stepPriceLogistics(missed);
+    const lowered = stepAgentSim(missed);
     expect(logisticsCell(lowered, 0, 0).laborAsk).toBe(9);
 
     const filled = emptyState();
@@ -271,7 +271,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(filled, 0, 0).laborAsk = 10;
     logisticsCell(filled, 0, 0).lastLaborFilled = 1;
 
-    const raised = stepPriceLogistics(filled);
+    const raised = stepAgentSim(filled);
     expect(logisticsCell(raised, 0, 0).laborAsk).toBe(12);
   });
 
@@ -281,7 +281,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(missed, 0, 0).laborBid = 8;
     logisticsCell(missed, 0, 0).lastLaborBidUnfilled = 1;
 
-    const raised = stepPriceLogistics(missed);
+    const raised = stepAgentSim(missed);
     expect(logisticsCell(raised, 0, 0).laborBid).toBe(10);
 
     const filled = emptyState();
@@ -289,7 +289,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(filled, 0, 0).laborBid = 8;
     logisticsCell(filled, 0, 0).lastLaborBidFilled = 1;
 
-    const lowered = stepPriceLogistics(filled);
+    const lowered = stepAgentSim(filled);
     expect(logisticsCell(lowered, 0, 0).laborBid).toBe(6);
   });
 
@@ -304,7 +304,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(state, 0, 0).laborBid = 8;
     logisticsCell(state, 0, 0).laborAsk = 2;
 
-    const next = stepPriceLogistics(state);
+    const next = stepAgentSim(state);
 
     expect(next.events.some((event) => event.kind === "labor" && event.x === 0 && event.y === 0)).toBe(true);
     expect(logisticsCell(next, 0, 0).producerStock).toBe(1);
@@ -324,7 +324,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(state, 0, 0).laborAsk = 2;
     logisticsCell(state, 0, 0).laborStock = 1;
 
-    const next = stepPriceLogistics(state);
+    const next = stepAgentSim(state);
 
     expect(next.events.some((event) => event.kind === "labor")).toBe(false);
     expect(logisticsCell(next, 0, 0).producerStock).toBe(0);
@@ -342,7 +342,7 @@ describe("price-field logistics sim", () => {
     addLedgerBalance(state.ledger, PRODUCER_AGENT, account, "labor", 4);
     addLedgerBalance(state.ledger, PRODUCER_AGENT, account, "factory", 1);
 
-    const next = stepPriceLogistics(state);
+    const next = stepAgentSim(state);
 
     expect(getLedgerBalance(next.ledger, PRODUCER_AGENT, account, "labor")).toBe(2);
     expect(getLedgerBalance(next.ledger, PRODUCER_AGENT, account, "factory")).toBe(1);
@@ -356,7 +356,7 @@ describe("price-field logistics sim", () => {
     addLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "labor", 1);
     addLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "farm", 1);
 
-    const next = stepPriceLogistics(state);
+    const next = stepAgentSim(state);
 
     expect(getLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "labor")).toBe(0);
     expect(getLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "farm")).toBe(1);
@@ -382,7 +382,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(state, 0, 0).farmStock = 1;
     addLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "farm", 1);
 
-    const next = stepPriceLogistics(state);
+    const next = stepAgentSim(state);
 
     expect(next.events.some((event) => event.kind === "labor" && event.x === 0 && event.y === 0)).toBe(true);
     expect(getLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "food")).toBe(1);
@@ -398,7 +398,7 @@ describe("price-field logistics sim", () => {
     addLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "product", 1);
     addLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "farm", 2);
 
-    const next = stepPriceLogistics(state);
+    const next = stepAgentSim(state);
 
     expect(getLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "labor")).toBe(0);
     expect(getLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "product")).toBe(0);
@@ -421,7 +421,7 @@ describe("price-field logistics sim", () => {
     cell.logisticsStock = 1;
     addLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "food", 1);
 
-    const next = stepPriceLogistics(state);
+    const next = stepAgentSim(state);
 
     expect(logisticsCell(next, 0, 0).lastFoodBidFilled).toBe(1);
     expect(logisticsCell(next, 0, 0).lastBidFilled).toBe(0);
@@ -436,7 +436,7 @@ describe("price-field logistics sim", () => {
     cell.population = 10;
     cell.malnutritionBurden = 1;
 
-    const next = stepPriceLogistics(state);
+    const next = stepAgentSim(state);
 
     expect(logisticsCell(next, 0, 0).foodConsumed).toBe(0);
     expect(logisticsCell(next, 0, 0).malnutritionBurden).toBe(1);
@@ -460,7 +460,7 @@ describe("price-field logistics sim", () => {
     cell.malnutritionBurden = 0.5;
     addLedgerBalance(state.ledger, consumer, account, "food", 4);
 
-    const next = stepPriceLogistics(state);
+    const next = stepAgentSim(state);
 
     expect(Number.isInteger(getLedgerBalance(next.ledger, consumer, account, "labor"))).toBe(true);
     expect(Number.isInteger(getLedgerBalance(next.ledger, consumer, account, "food"))).toBe(true);
@@ -474,8 +474,8 @@ describe("price-field logistics sim", () => {
     cell.consumerMoney = 20;
     cell.logisticsStock = 1;
 
-    expect(() => stepPriceLogistics(state)).not.toThrow();
-    expect(stepPriceLogistics(state).trades).toHaveLength(0);
+    expect(() => stepAgentSim(state)).not.toThrow();
+    expect(stepAgentSim(state).trades).toHaveLength(0);
   });
 
   it("allocates producer money to the factory with the larger labor margin first", () => {
@@ -495,7 +495,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(state, 1, 0).laborBid = 8;
     logisticsCell(state, 1, 0).laborAsk = 2;
 
-    const next = stepPriceLogistics(state);
+    const next = stepAgentSim(state);
 
     expect(logisticsCell(next, 0, 0).producerStock).toBe(1);
     expect(logisticsCell(next, 1, 0).producerStock).toBe(1);
