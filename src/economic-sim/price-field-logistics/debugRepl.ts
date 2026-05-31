@@ -4,7 +4,7 @@ import {
   type PriceLogisticsDebugSession,
   type PriceLogisticsSessionSummary,
 } from "./debugSession";
-import type { PriceMarketResource, PriceOrderResult, PriceTrade } from "./engine";
+import type { MarketResource, OrderResult, Trade } from "./engine";
 
 export type ReplRuntime = {
   session: PriceLogisticsDebugSession;
@@ -20,7 +20,7 @@ export type ReplCommandResult = {
   exit?: boolean;
 };
 
-const MARKET_RESOURCES: PriceMarketResource[] = ["product", "food", "labor"];
+const MARKET_RESOURCES: MarketResource[] = ["product", "food", "labor"];
 
 function words(input: string) {
   return input.trim().split(/\s+/).filter(Boolean);
@@ -41,12 +41,12 @@ function parseCellArgs(args: string[]) {
   throw new Error("expected cell coordinates as x y or x,y");
 }
 
-function parseResource(value: string | undefined): PriceMarketResource {
+function parseResource(value: string | undefined): MarketResource {
   const resource = value ?? "product";
-  if (!MARKET_RESOURCES.includes(resource as PriceMarketResource)) {
+  if (!MARKET_RESOURCES.includes(resource as MarketResource)) {
     throw new Error(`resource must be one of ${MARKET_RESOURCES.join(", ")}`);
   }
-  return resource as PriceMarketResource;
+  return resource as MarketResource;
 }
 
 function parseResetOptions(args: string[]) {
@@ -202,11 +202,11 @@ function renderCell(cell: CellDebugSnapshot) {
   ].join("\n");
 }
 
-function summarizeOrder(order: PriceOrderResult) {
+function summarizeOrder(order: OrderResult) {
   return `${order.side} ${order.agent} ${order.filled}/${order.quantity} @ ${order.price}${order.unfilled ? ` open=${order.unfilled}` : ""}`;
 }
 
-function summarizeTrade(trade: PriceTrade) {
+function summarizeTrade(trade: Trade) {
   return `${trade.buyer} <- ${trade.seller} ${trade.quantity} @ ${trade.price}`;
 }
 

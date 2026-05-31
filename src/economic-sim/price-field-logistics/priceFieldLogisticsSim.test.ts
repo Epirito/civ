@@ -1,22 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
   FARM_PRODUCER_AGENT,
+  LOGISTICS_AGENT,
   PRODUCER_AGENT,
   accountOfCell,
   addLedgerBalance,
   consumerAgentForCell,
   getLedgerBalance,
   logisticsCell,
+  movedAccountOfCell,
   runAuction,
   setLedgerBalance,
   type PriceAgent,
-  type PriceLogisticsCell,
-  type PriceLogisticsState,
-  type PriceMarketResource,
+  type Cell,
+  type State,
+  type MarketResource,
   type PriceMarketTickHistory,
-  type PriceOrderResult,
+  type OrderResult,
 } from "./engine";
-import { effectiveProductBid, stepAgentSim } from "./agents";
+import { stepAgentSim } from "./agents";
 import { createPriceLogisticsState } from "./scenario";
 import { accountOf } from "../shared/accounts";
 import { fieldCell } from "./priceFieldAutomaton";
@@ -32,7 +34,7 @@ function emptyMarketHistory(turn = 0): PriceMarketTickHistory {
   };
 }
 
-function historyTick(cell: PriceLogisticsCell, turn: number) {
+function historyTick(cell: Cell, turn: number) {
   let tick = cell.marketHistory.find((entry) => entry.turn === turn);
   if (!tick) {
     tick = emptyMarketHistory(turn);
@@ -45,12 +47,12 @@ function historyTick(cell: PriceLogisticsCell, turn: number) {
 }
 
 function seedOrder(
-  cell: PriceLogisticsCell,
-  resource: PriceMarketResource,
+  cell: Cell,
+  resource: MarketResource,
   side: "bid" | "ask",
   agent: PriceAgent,
   price: number,
-  result: Partial<Pick<PriceOrderResult, "filled" | "unfilled" | "quantity">> = {},
+  result: Partial<Pick<OrderResult, "filled" | "unfilled" | "quantity">> = {},
 ) {
   if (price <= 0) return;
   const quantity = result.quantity ?? Math.max(1, (result.filled ?? 0) + (result.unfilled ?? 0));
@@ -67,35 +69,35 @@ function seedOrder(
   });
 }
 
-function seedConsumerProductBid(cell: PriceLogisticsCell, price: number, result?: Partial<Pick<PriceOrderResult, "filled" | "unfilled" | "quantity">>) {
+function seedConsumerProductBid(cell: Cell, price: number, result?: Partial<Pick<OrderResult, "filled" | "unfilled" | "quantity">>) {
   seedOrder(cell, "product", "bid", consumerAgentForCell(cell), price, result);
 }
 
-function seedConsumerFoodBid(cell: PriceLogisticsCell, price: number, result?: Partial<Pick<PriceOrderResult, "filled" | "unfilled" | "quantity">>) {
+function seedConsumerFoodBid(cell: Cell, price: number, result?: Partial<Pick<OrderResult, "filled" | "unfilled" | "quantity">>) {
   seedOrder(cell, "food", "bid", consumerAgentForCell(cell), price, result);
 }
 
-function seedConsumerLaborAsk(cell: PriceLogisticsCell, price: number, result?: Partial<Pick<PriceOrderResult, "filled" | "unfilled" | "quantity">>) {
+function seedConsumerLaborAsk(cell: Cell, price: number, result?: Partial<Pick<OrderResult, "filled" | "unfilled" | "quantity">>) {
   seedOrder(cell, "labor", "ask", consumerAgentForCell(cell), price, result);
 }
 
-function seedProducerProductAsk(cell: PriceLogisticsCell, price: number, result?: Partial<Pick<PriceOrderResult, "filled" | "unfilled" | "quantity">>) {
+function seedProducerProductAsk(cell: Cell, price: number, result?: Partial<Pick<OrderResult, "filled" | "unfilled" | "quantity">>) {
   seedOrder(cell, "product", "ask", PRODUCER_AGENT, price, result);
 }
 
-function seedFarmFoodAsk(cell: PriceLogisticsCell, price: number, result?: Partial<Pick<PriceOrderResult, "filled" | "unfilled" | "quantity">>) {
+function seedFarmFoodAsk(cell: Cell, price: number, result?: Partial<Pick<OrderResult, "filled" | "unfilled" | "quantity">>) {
   seedOrder(cell, "food", "ask", FARM_PRODUCER_AGENT, price, result);
 }
 
-function seedProducerLaborBid(cell: PriceLogisticsCell, price: number, result?: Partial<Pick<PriceOrderResult, "filled" | "unfilled" | "quantity">>) {
+function seedProducerLaborBid(cell: Cell, price: number, result?: Partial<Pick<OrderResult, "filled" | "unfilled" | "quantity">>) {
   seedOrder(cell, "labor", "bid", PRODUCER_AGENT, price, result);
 }
 
-function seedFarmLaborBid(cell: PriceLogisticsCell, price: number, result?: Partial<Pick<PriceOrderResult, "filled" | "unfilled" | "quantity">>) {
+function seedFarmLaborBid(cell: Cell, price: number, result?: Partial<Pick<OrderResult, "filled" | "unfilled" | "quantity">>) {
   seedOrder(cell, "labor", "bid", FARM_PRODUCER_AGENT, price, result);
 }
 
-function addConsumerFoodBuffer(state: PriceLogisticsState, cell: PriceLogisticsCell) {
+function addConsumerFoodBuffer(state: State, cell: Cell) {
   addLedgerBalance(
     state.ledger,
     consumerAgentForCell(cell),
@@ -106,12 +108,12 @@ function addConsumerFoodBuffer(state: PriceLogisticsState, cell: PriceLogisticsC
 }
 
 function addMarketOrder(
-  cell: PriceLogisticsCell,
-  resource: PriceMarketResource,
+  cell: Cell,
+  resource: MarketResource,
   side: "bid" | "ask",
   agent: PriceAgent,
   price: number,
-  result: Partial<Pick<PriceOrderResult, "filled" | "unfilled" | "quantity">> = {},
+  result: Partial<Pick<OrderResult, "filled" | "unfilled" | "quantity">> = {},
 ) {
   const quantity = result.quantity ?? Math.max(1, (result.filled ?? 0) + (result.unfilled ?? 0));
   historyTick(cell, 1).resources[resource].orders.push({
@@ -127,7 +129,7 @@ function addMarketOrder(
   });
 }
 
-function emptyState(width = 5, height = 1): PriceLogisticsState {
+function emptyState(width = 5, height = 1): State {
   const state = createPriceLogisticsState(width, height);
   state.ledger = {};
   state.money = 50;
@@ -151,12 +153,11 @@ function emptyState(width = 5, height = 1): PriceLogisticsState {
     cell.farmStock = 0;
     cell.logisticsStock = 0;
     cell.logisticsFoodStock = 0;
-    cell.movedStock = 0;
   }
   return state;
 }
 
-function stepTimes(state: PriceLogisticsState, count: number) {
+function stepTimes(state: State, count: number) {
   let current = state;
   for (let step = 0; step < count; step += 1) {
     current = stepAgentSim(current);
@@ -176,7 +177,7 @@ describe("price-field logistics sim", () => {
     const next = stepTimes(state, 5);
 
     expect(logisticsCell(next, 0, 0).logisticsStock).toBe(0);
-    expect(logisticsCell(next, 1, 0).movedStock).toBe(1);
+    expect(getLedgerBalance(next.ledger, LOGISTICS_AGENT, movedAccountOfCell(logisticsCell(next, 1, 0)), "product")).toBe(1);
     expect(next.events).toContainEqual(expect.objectContaining({ kind: "move", fromX: 0, fromY: 0, toX: 1, toY: 0 }));
   });
 
@@ -191,10 +192,10 @@ describe("price-field logistics sim", () => {
     const first = stepTimes(state, 5);
     const second = stepAgentSim(first);
 
-    expect(logisticsCell(first, 1, 0).movedStock).toBe(1);
-    expect(logisticsCell(first, 2, 0).movedStock).toBe(0);
+    expect(getLedgerBalance(first.ledger, LOGISTICS_AGENT, movedAccountOfCell(logisticsCell(first, 1, 0)), "product")).toBe(1);
+    expect(getLedgerBalance(first.ledger, LOGISTICS_AGENT, movedAccountOfCell(logisticsCell(first, 2, 0)), "product")).toBe(0);
     expect(logisticsCell(second, 1, 0).logisticsStock).toBe(0);
-    expect(logisticsCell(second, 2, 0).movedStock).toBe(1);
+    expect(getLedgerBalance(second.ledger, LOGISTICS_AGENT, movedAccountOfCell(logisticsCell(second, 2, 0)), "product")).toBe(1);
   });
 
   it("buys producer stock when propagated bid value beats the local ask", () => {
@@ -243,7 +244,7 @@ describe("price-field logistics sim", () => {
 
     expect(next.events.some((event) => event.kind === "sell" && event.x === 2 && event.y === 0)).toBe(true);
     expect(next.money).toBeGreaterThan(state.money);
-    expect(logisticsCell(next, 2, 0).consumerMoney).toBeLessThan(logisticsCell(state, 2, 0).consumerMoney + 12);
+    expect(logisticsCell(next, 2, 0).consumerMoney).toBeLessThan((logisticsCell(state, 2, 0).consumerMoney ?? 0) + 12);
     expect(logisticsCell(next, 2, 0).fieldBid).toBeGreaterThan(0);
     expect(logisticsCell(next, 2, 0).bidVolume).toBeGreaterThan(0);
   });
@@ -285,7 +286,6 @@ describe("price-field logistics sim", () => {
     const next = stepAgentSim(state);
 
     expect(logisticsCell(next, 2, 0).consumerMoney).toBe(0);
-    expect(effectiveProductBid(logisticsCell(next, 2, 0))).toBe(0);
     expect(next.events).toContainEqual(expect.objectContaining({ kind: "sell", price: 7 }));
   });
 

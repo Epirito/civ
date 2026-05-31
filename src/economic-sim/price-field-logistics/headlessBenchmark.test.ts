@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { type PriceLogisticsBenchmarkSummary, runPriceLogisticsBenchmark } from "./headlessBenchmark";
-import { createPriceLogisticsState } from "./scenario";
+import { createOneCellPriceLogisticsState, createPriceLogisticsState } from "./scenario";
 
 const EXPECTED_SUMMARY_URL = new URL("./headlessBenchmark.expected.json", import.meta.url);
 
@@ -53,5 +53,15 @@ describe("price-field logistics benchmark", () => {
     expect(state.height).toBe(36);
     expect(state.cells.some((cell) => cell.land)).toBe(true);
     expect(state.cells.some((cell) => !cell.land)).toBe(true);
+  });
+
+  it("creates a one-cell scenario for local market debugging", () => {
+    const state = createOneCellPriceLogisticsState();
+
+    expect(state.width).toBe(1);
+    expect(state.height).toBe(1);
+    expect(state.cells).toHaveLength(1);
+    expect(state.cells[0].land).toBe(true);
+    expect(state.cells[0].marketHistory.length).toBeGreaterThan(0);
   });
 });

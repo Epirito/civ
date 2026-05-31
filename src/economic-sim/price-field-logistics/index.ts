@@ -1,16 +1,17 @@
-export { PriceFieldLogisticsPage } from "./PriceFieldLogisticsPage";
+export { OneCellPriceFieldLogisticsPage, PriceFieldLogisticsPage } from "./PriceFieldLogisticsPage";
 export {
   logisticsCell,
   runAuction,
-  type PriceLogisticsCell,
+  type Cell as PriceLogisticsCell,
   type PriceLogisticsEvent,
-  type PriceLogisticsState,
+  type State as PriceLogisticsState,
 } from "./engine";
-export { effectiveProductBid, stepAgentSim as stepPriceLogistics } from "./agents";
-export { createPriceLogisticsState } from "./scenario";
+export { stepAgentSim as stepPriceLogistics } from "./agents";
+export { createOneCellPriceLogisticsState, createPriceLogisticsState } from "./scenario";
 export {
   createPriceLogisticsDebugSession,
   evaluateInSession,
   type CellDebugSnapshot,
   type PriceLogisticsDebugSession,
 } from "./debugSession";
+export { cellLedgerData, cellResourceTotal, stateLedgerData } from "./uiData";

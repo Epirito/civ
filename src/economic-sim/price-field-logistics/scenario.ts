@@ -1,5 +1,6 @@
 import { TILE_STUDY_COLUMNS, TILE_STUDY_ROWS, regionBlocks } from "../logistics-at-a-distance/tileStudyData";
 import { createPriceFieldState } from "./priceFieldAutomaton";
+import { recipes } from "./recipes";
 import {
   FARM_PRODUCER_AGENT,
   LOGISTICS_AGENT,
@@ -7,15 +8,14 @@ import {
   PRODUCER_AGENT,
   accountOfCell,
   addLedgerBalance,
-  refreshCellBalances,
   type PriceAgent,
-  type PriceLedger,
-  type PriceLogisticsCell,
-  type PriceLogisticsState,
-  type PriceMarketResource,
+  type Ledger,
+  type Cell,
+  type State,
+  type MarketResource,
   type PriceMarketResourceHistory,
   type PriceMarketTickHistory,
-  type PriceOrderResult,
+  type OrderResult,
 } from "./engine";
 import type { Account } from "../shared/types";
 
@@ -40,7 +40,7 @@ function farmAmount(x: number, y: number) {
   if (x >= 12 && x <= 18 && y >= 14 && y <= 25) return 3;
   if (x >= 29 && x <= 40 && y >= 14 && y <= 20) return 2;
   if (x >= 52 && x <= 60 && y >= 21 && y <= 27) return 2;
-  return (x + y) % 5 === 0 ? 1 : 0;
+  return (x + y) % 5 === 0 ? 3 : 0;
 }
 
 function factoryAmount(x: number, y: number) {
@@ -71,11 +71,11 @@ function seedOrder({
   id: number;
   agent: PriceAgent;
   account: Account;
-  resource: PriceMarketResource;
+  resource: MarketResource;
   side: "bid" | "ask";
   price: number;
   quantity?: number;
-}): PriceOrderResult {
+}): OrderResult {
   return { id, agent, account, resource, side, price, quantity, filled: 0, unfilled: 0 };
 }
 
@@ -144,12 +144,12 @@ function initialMarketHistory(cell: { x: number; y: number }, population: number
   return [{ turn: 0, resources }];
 }
 
-export function createPriceLogisticsState(width = TILE_STUDY_COLUMNS, height = TILE_STUDY_ROWS): PriceLogisticsState {
-  const ledger: PriceLedger = {};
+export function createPriceLogisticsState(width = TILE_STUDY_COLUMNS, height = TILE_STUDY_ROWS): State {
+  const ledger: Ledger = {};
   const useWorld = width === TILE_STUDY_COLUMNS && height === TILE_STUDY_ROWS;
   const landSet = worldLandSet();
-  const cells: PriceLogisticsCell[] = Array.from({ length: height }, (_row, y) =>
-    Array.from({ length: width }, (_column, x): PriceLogisticsCell => {
+  const cells: Cell[] = Array.from({ length: height }, (_row, y) =>
+    Array.from({ length: width }, (_column, x): Cell => {
       const land = useWorld ? landSet.has(`${x},${y}`) : true;
       const factory = land ? factoryAmount(x, y) : 0;
       const farm = land ? farmAmount(x, y) : 0;
@@ -158,34 +158,13 @@ export function createPriceLogisticsState(width = TILE_STUDY_COLUMNS, height = T
         x,
         y,
         land,
-        consumerMoney: 0,
         population,
         malnutritionBurden: 0,
         foodConsumed: 0,
-        laborStock: 0,
         fieldBid: 0,
         bidVolume: 0,
         foodFieldBid: 0,
         foodBidVolume: 0,
-        producerStock: 0,
-        producerFoodStock: 0,
-        farmProducerFoodStock: 0,
-        farmStock: farm,
-        logisticsStock: 0,
-        logisticsFoodStock: 0,
-        movedStock: 0,
-        lastBidFilled: 0,
-        lastBidUnfilled: 0,
-        lastFoodBidFilled: 0,
-        lastFoodBidUnfilled: population,
-        lastLaborBidFilled: 0,
-        lastLaborBidUnfilled: factory || farm ? 1 : 0,
-        lastLaborFilled: 0,
-        lastLaborUnfilled: population,
-        lastAskFilled: 0,
-        lastAskUnfilled: factory ? 1 : 0,
-        lastFoodAskFilled: 0,
-        lastFoodAskUnfilled: farm ? 1 : 0,
         marketHistory: initialMarketHistory({ x, y }, population, factory, farm),
       };
       if (population > 0) {
@@ -205,7 +184,7 @@ export function createPriceLogisticsState(width = TILE_STUDY_COLUMNS, height = T
   addLedgerBalance(ledger, PRODUCER_AGENT, MONEY_ACCOUNT, "money", 420);
   addLedgerBalance(ledger, FARM_PRODUCER_AGENT, MONEY_ACCOUNT, "money", 420);
 
-  const state: PriceLogisticsState = {
+  const state: State = {
     width,
     height,
     turn: 0,
@@ -214,26 +193,7 @@ export function createPriceLogisticsState(width = TILE_STUDY_COLUMNS, height = T
     orders: [],
     lastOrderResults: [],
     trades: [],
-    recipes: [
-      {
-        id: "factory-product",
-        inputs: { labor: 1 },
-        requirements: { factory: 1 },
-        outputs: { product: 1 },
-      },
-      {
-        id: "factory-farming",
-        inputs: { labor: 1, product: 1 },
-        requirements: { farm: 2 },
-        outputs: { food: 6 },
-      },
-      {
-        id: "subsistence-food",
-        inputs: { labor: 1 },
-        requirements: { farm: 1 },
-        outputs: { food: 3 },
-      },
-    ],
+    recipes,
     logisticsResources: ["product", "food"],
     money: 180,
     producerMoney: 420,
@@ -246,6 +206,9 @@ export function createPriceLogisticsState(width = TILE_STUDY_COLUMNS, height = T
     },
     events: [],
   };
-  refreshCellBalances(state);
   return state;
+}
+
+export function createOneCellPriceLogisticsState() {
+  return createPriceLogisticsState(1, 1);
 }

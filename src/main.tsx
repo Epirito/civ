@@ -4,6 +4,7 @@ import { fromArrayBuffer } from "geotiff";
 import { Activity, BarChart3, Blocks, Box, Eye, EyeOff, LocateFixed, Map, Minus, Plus, RotateCcw, Truck } from "lucide-react";
 import {
   EconomicSimPage,
+  OneCellPriceFieldLogisticsPage,
   PriceFieldExperimentPage,
   PriceFieldLogisticsPage,
   TileAesthetic3DPage,
@@ -467,7 +468,7 @@ function GeoMapPage() {
   );
 }
 
-type RouteKey = "map" | "sim" | "field" | "fieldLogistics" | "tiles" | "tiles3d";
+type RouteKey = "map" | "sim" | "field" | "fieldLogistics" | "fieldLogisticsOneCell" | "tiles" | "tiles3d";
 
 type AppRoute = {
   key: RouteKey;
@@ -493,6 +494,13 @@ const ROUTES: AppRoute[] = [
     label: "Field logistics",
     icon: <Truck size={16} />,
     element: <PriceFieldLogisticsPage />,
+  },
+  {
+    key: "fieldLogisticsOneCell",
+    path: "/price-logistics-1x1",
+    label: "One-cell market",
+    icon: <Truck size={16} />,
+    element: <OneCellPriceFieldLogisticsPage />,
   },
   { key: "tiles", path: "/tile-study", label: "Tile study", icon: <Blocks size={16} />, element: <TileAestheticPage /> },
   { key: "tiles3d", path: "/tile-study-3d", label: "3D tiles", icon: <Box size={16} />, element: <TileAesthetic3DPage /> },

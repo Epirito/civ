@@ -10,16 +10,17 @@ import {
   getLedgerBalance,
   logisticsCell,
   type PriceAgent,
-  type PriceLogisticsCell,
+  type Cell,
   type PriceLogisticsEvent,
-  type PriceLogisticsState,
-  type PriceMarketResource,
+  type State,
+  type MarketResource,
   type PriceResource,
 } from "./engine";
 import type { Account } from "../shared/types";
 import { stepAgentSim } from "./agents";
-import { createPriceLogisticsState } from "./scenario";
+import { createOneCellPriceLogisticsState, createPriceLogisticsState } from "./scenario";
 import { fieldCell } from "./priceFieldAutomaton";
+import { cellLedgerData, cellResourceTotal, stateLedgerData } from "./uiData";
 
 type HeatmapMode =
   | "none"
@@ -33,21 +34,7 @@ type HeatmapMode =
   | "resource:farm"
   | "malnutrition";
 
-function cellResourceTotal(state: PriceLogisticsState, cell: PriceLogisticsCell, resource: PriceResource) {
-  const account = accountOfCell(cell);
-  const consumer = consumerAgentForCell(cell);
-  if (resource === "money") {
-    return getLedgerBalance(state.ledger, consumer, MONEY_ACCOUNT, "money");
-  }
-  return (
-    getLedgerBalance(state.ledger, consumer, account, resource) +
-    getLedgerBalance(state.ledger, PRODUCER_AGENT, account, resource) +
-    getLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, resource) +
-    getLedgerBalance(state.ledger, LOGISTICS_AGENT, account, resource)
-  );
-}
-
-function heatmapValue(state: PriceLogisticsState, cell: PriceLogisticsCell, mode: HeatmapMode) {
+function heatmapValue(state: State, cell: Cell, mode: HeatmapMode) {
   if (mode === "price:product") return fieldCell(state.bidFields.product, cell.x, cell.y).price;
   if (mode === "price:food") return fieldCell(state.bidFields.food, cell.x, cell.y).price;
   if (mode === "malnutrition") return cell.malnutritionBurden;
@@ -70,7 +57,7 @@ function sameCell(a: CellCoord | null, b: CellCoord | null) {
 
 function drawLogistics(
   canvas: HTMLCanvasElement,
-  state: PriceLogisticsState,
+  state: State,
   heatmap: HeatmapMode,
   hover: CellCoord | null,
   selected: CellCoord | null,
@@ -105,6 +92,7 @@ function drawLogistics(
     const x = cell.x * cellSize;
     const y = cell.y * cellSize;
     const field = fieldCell(state.bidFields.product, cell.x, cell.y);
+    const ledger = cellLedgerData(state, cell);
     const heat = heatmapValue(state, cell, heatmap);
     const heatT = Math.max(0, Math.min(1, heat / maxHeat));
     context.fillStyle = !cell.land
@@ -121,18 +109,18 @@ function drawLogistics(
       context.fillStyle = burden > 0.4 ? "#ef4444" : "#22c55e";
       context.fillRect(x + 3, y + cellSize - Math.max(7, cellSize * 0.24), Math.max(4, cellSize * 0.2), Math.max(4, cellSize * 0.2));
     }
-    if (cell.logisticsStock > 0 || cell.movedStock > 0) {
-      context.fillStyle = cell.movedStock > 0 ? "#fef08a" : "#ffffff";
+    if (ledger.logisticsProduct > 0 || ledger.movedProduct > 0) {
+      context.fillStyle = ledger.movedProduct > 0 ? "#fef08a" : "#ffffff";
       context.beginPath();
       context.arc(x + cellSize / 2, y + cellSize / 2, Math.max(3, cellSize * 0.13), 0, Math.PI * 2);
       context.fill();
     }
-    if (cellSize >= 28 && cell.logisticsStock > 0) {
+    if (cellSize >= 28 && ledger.logisticsProduct > 0) {
       context.fillStyle = "rgba(255,255,255,0.88)";
       context.font = "10px ui-sans-serif, system-ui";
       context.textAlign = "center";
       context.fillText(
-        `${Math.round(field.price)}/${cell.logisticsStock + cell.movedStock}`,
+        `${Math.round(field.price)}/${ledger.logisticsProduct + ledger.movedProduct}`,
         x + cellSize / 2,
         y + cellSize - 7,
       );
@@ -161,7 +149,7 @@ function eventLabel(event: PriceLogisticsEvent) {
   return `move ${event.fromX},${event.fromY} -> ${event.toX},${event.toY}`;
 }
 
-function cellFromPointer(canvas: HTMLCanvasElement, state: PriceLogisticsState, clientX: number, clientY: number) {
+function cellFromPointer(canvas: HTMLCanvasElement, state: State, clientX: number, clientY: number) {
   const bounds = canvas.getBoundingClientRect();
   const margin = 28;
   const cellSize = Math.floor(Math.min((bounds.width - margin * 2) / state.width, (bounds.height - margin * 2) / state.height));
@@ -178,7 +166,7 @@ function shortAgent(agent: PriceAgent) {
   return agent;
 }
 
-function marketLabel(resource: PriceMarketResource) {
+function marketLabel(resource: MarketResource) {
   if (resource === "product") return "Product";
   if (resource === "food") return "Food";
   return "Labor";
@@ -191,16 +179,17 @@ function CellHoverReadout({
   marketResource,
   onMarketResourceChange,
 }: {
-  state: PriceLogisticsState;
-  cell: PriceLogisticsCell | null;
+  state: State;
+  cell: Cell | null;
   selected: boolean;
-  marketResource: PriceMarketResource | null;
-  onMarketResourceChange: (resource: PriceMarketResource) => void;
+  marketResource: MarketResource | null;
+  onMarketResourceChange: (resource: MarketResource) => void;
 }) {
   if (!cell) return <strong>{state.width} x {state.height} field logistics</strong>;
   const field = fieldCell(state.bidField, cell.x, cell.y);
   const account = accountOfCell(cell);
   const consumer = consumerAgentForCell(cell);
+  const ledger = cellLedgerData(state, cell);
   const balance = (agent: PriceAgent, ledgerAccount: Account, resource: PriceResource) =>
     getLedgerBalance(state.ledger, agent, ledgerAccount, resource);
   const resourceHistory = marketResource
@@ -213,7 +202,7 @@ function CellHoverReadout({
         {selected ? <span>Selected</span> : <span>Hover</span>}
       </div>
       <div className="cell-hover-summary">
-        <span><DollarSign size={13} />{Math.round(cell.consumerMoney)}</span>
+        <span><DollarSign size={13} />{Math.round(ledger.consumerMoney)}</span>
         <span><Users size={13} />{cell.population.toFixed(1)}</span>
         <span><HeartPulse size={13} />{cell.malnutritionBurden.toFixed(2)}</span>
       </div>
@@ -269,7 +258,7 @@ function CellHoverReadout({
         </div>
       </div>
       <div className="cell-market-tabs" aria-label="Market history resource">
-        {(["product", "food", "labor"] as PriceMarketResource[]).map((resource) => (
+        {(["product", "food", "labor"] as MarketResource[]).map((resource) => (
           <button
             key={resource}
             className={marketResource === resource ? "active" : ""}
@@ -316,33 +305,44 @@ function CellHoverReadout({
   );
 }
 
-export function PriceFieldLogisticsPage() {
+type PriceFieldLogisticsPageProps = {
+  title?: string;
+  eyebrow?: string;
+  createInitialState?: () => State;
+};
+
+export function PriceFieldLogisticsPage({
+  title = "Gradient trade",
+  eyebrow = "Field logistics",
+  createInitialState = createPriceLogisticsState,
+}: PriceFieldLogisticsPageProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [state, setState] = useState(createPriceLogisticsState);
+  const [state, setState] = useState(createInitialState);
   const [running, setRunning] = useState(true);
   const [fast, setFast] = useState(false);
   const [heatmap, setHeatmap] = useState<HeatmapMode>("price:product");
   const [hover, setHover] = useState<CellCoord | null>(null);
   const [selected, setSelected] = useState<CellCoord | null>(null);
-  const [marketResource, setMarketResource] = useState<PriceMarketResource | null>(null);
+  const [marketResource, setMarketResource] = useState<MarketResource | null>(null);
   const [hoverReadoutTop, setHoverReadoutTop] = useState(false);
   const stateRef = useRef(state);
   const steppingRef = useRef(false);
+  const stateLedger = stateLedgerData(state);
 
   const totals = useMemo(
     () => ({
-      producer: state.cells.reduce((sum, cell) => sum + cell.producerStock, 0),
-      producerFood: state.cells.reduce((sum, cell) => sum + cell.producerFoodStock, 0),
-      farmFood: state.cells.reduce((sum, cell) => sum + cell.farmProducerFoodStock, 0),
-      logistics: state.cells.reduce((sum, cell) => sum + cell.logisticsStock, 0),
-      logisticsFood: state.cells.reduce((sum, cell) => sum + cell.logisticsFoodStock, 0),
-      moved: state.cells.reduce((sum, cell) => sum + cell.movedStock, 0),
+      producer: state.cells.reduce((sum, cell) => sum + cellLedgerData(state, cell).producerProduct, 0),
+      producerFood: state.cells.reduce((sum, cell) => sum + cellLedgerData(state, cell).producerFood, 0),
+      farmFood: state.cells.reduce((sum, cell) => sum + cellLedgerData(state, cell).farmFood, 0),
+      logistics: state.cells.reduce((sum, cell) => sum + cellLedgerData(state, cell).logisticsProduct, 0),
+      logisticsFood: state.cells.reduce((sum, cell) => sum + cellLedgerData(state, cell).logisticsFood, 0),
+      moved: state.cells.reduce((sum, cell) => sum + cellLedgerData(state, cell).movedProduct, 0),
       residualDemand: state.cells.reduce((sum, cell) => sum + cell.bidVolume, 0),
       population: state.cells.reduce((sum, cell) => sum + cell.population, 0),
       malnutrition: state.cells.reduce((sum, cell) => sum + cell.malnutritionBurden * cell.population, 0),
       foodConsumed: state.cells.reduce((sum, cell) => sum + cell.foodConsumed, 0),
-      labor: state.cells.reduce((sum, cell) => sum + cell.laborStock, 0),
-      consumerMoney: state.cells.reduce((sum, cell) => sum + cell.consumerMoney, 0),
+      labor: state.cells.reduce((sum, cell) => sum + cellLedgerData(state, cell).consumerLabor, 0),
+      consumerMoney: state.cells.reduce((sum, cell) => sum + cellLedgerData(state, cell).consumerMoney, 0),
     }),
     [state],
   );
@@ -408,8 +408,8 @@ export function PriceFieldLogisticsPage() {
     <main className="field-experiment-app">
       <aside className="field-panel">
         <section>
-          <p className="eyebrow">Field logistics</p>
-          <h1>Gradient trade</h1>
+          <p className="eyebrow">{eyebrow}</p>
+          <h1>{title}</h1>
         </section>
         <section className="field-buttons" aria-label="Simulation controls">
           <button onClick={() => setRunning((current) => !current)}>{running ? <Pause size={18} /> : <Play size={18} />}</button>
@@ -419,7 +419,7 @@ export function PriceFieldLogisticsPage() {
           <button className={fast ? "active" : ""} onClick={() => setFast((current) => !current)} title="Run fast">
             <FastForward size={18} />
           </button>
-          <button onClick={() => setState(createPriceLogisticsState())}>
+          <button onClick={() => setState(createInitialState())}>
             <RotateCcw size={18} />
           </button>
         </section>
@@ -441,7 +441,7 @@ export function PriceFieldLogisticsPage() {
           <span>Turn</span>
           <strong>{state.turn}</strong>
           <span>Money</span>
-          <strong>{Math.round(state.money)}</strong>
+          <strong>{Math.round(stateLedger.logisticsMoney)}</strong>
           <span>Producer</span>
           <strong>{totals.producer}</strong>
           <span>Logistics</span>
@@ -457,7 +457,7 @@ export function PriceFieldLogisticsPage() {
           <span>Malnut.</span>
           <strong>{totals.population > 0 ? (totals.malnutrition / totals.population).toFixed(2) : "0.00"}</strong>
           <span>Center</span>
-          <strong>{Math.round(fieldCell(state.bidField, 9, 6).price)}</strong>
+          <strong>{Math.round(fieldCell(state.bidField, Math.min(9, state.width - 1), Math.min(6, state.height - 1)).price)}</strong>
         </section>
         <section>
           <h2>Agent totals</h2>
@@ -472,7 +472,7 @@ export function PriceFieldLogisticsPage() {
             </div>
             <div className="field-agent-row">
               <span><i style={{ background: "#f59e0b" }} />Producer</span>
-              <span>{Math.round(state.producerMoney)}</span>
+              <span>{Math.round(stateLedger.producerMoney)}</span>
               <span>{totals.producer}</span>
               <span>{totals.producerFood}</span>
               <span>-</span>
@@ -480,7 +480,7 @@ export function PriceFieldLogisticsPage() {
             </div>
             <div className="field-agent-row">
               <span><i style={{ background: "#a3e635" }} />Farm</span>
-              <span>{Math.round(state.farmProducerMoney)}</span>
+              <span>{Math.round(stateLedger.farmProducerMoney)}</span>
               <span>-</span>
               <span>{totals.farmFood}</span>
               <span>-</span>
@@ -488,7 +488,7 @@ export function PriceFieldLogisticsPage() {
             </div>
             <div className="field-agent-row">
               <span><i style={{ background: "#ffffff" }} />Logistics</span>
-              <span>{Math.round(state.money)}</span>
+              <span>{Math.round(stateLedger.logisticsMoney)}</span>
               <span>{totals.logistics}</span>
               <span>{totals.logisticsFood}</span>
               <span>{totals.moved}</span>
@@ -547,5 +547,15 @@ export function PriceFieldLogisticsPage() {
         </div>
       </section>
     </main>
+  );
+}
+
+export function OneCellPriceFieldLogisticsPage() {
+  return (
+    <PriceFieldLogisticsPage
+      eyebrow="Field logistics"
+      title="One-cell market"
+      createInitialState={createOneCellPriceLogisticsState}
+    />
   );
 }

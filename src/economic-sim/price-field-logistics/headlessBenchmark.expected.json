@@ -1,6 +1,6 @@
 {
   "turns": 3,
-  "trajectoryHash": "d079a1b89960790f",
+  "trajectoryHash": "8cdf937b689581d6",
   "trajectory": [
     {
       "turn": 0,
@@ -12,7 +12,7 @@
     },
     {
       "turn": 1,
-      "stateHash": "271714b37ffb72fc",
+      "stateHash": "5546b14378621449",
       "nextOrderId": 1169,
       "orders": 0,
       "trades": 106,
@@ -20,30 +20,30 @@
     },
     {
       "turn": 2,
-      "stateHash": "d675847b98a80eb2",
+      "stateHash": "c6ecfacea60f2842",
       "nextOrderId": 2330,
       "orders": 0,
-      "trades": 81,
-      "events": 81
+      "trades": 95,
+      "events": 95
     },
     {
       "turn": 3,
-      "stateHash": "ad475d083399420c",
-      "nextOrderId": 3542,
+      "stateHash": "a31a720019be55d0",
+      "nextOrderId": 3536,
       "orders": 0,
-      "trades": 139,
-      "events": 139
+      "trades": 132,
+      "events": 132
     }
   ],
   "finalTurn": 3,
-  "nextOrderId": 3542,
-  "trades": 139,
-  "events": 139,
+  "nextOrderId": 3536,
+  "trades": 132,
+  "events": 132,
   "totals": {
     "money": 61804,
     "product": 36,
-    "food": 1667,
-    "labor": 4132,
+    "food": 2803,
+    "labor": 4120,
     "factory": 347,
     "farm": 853
   },

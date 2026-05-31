@@ -25,13 +25,10 @@ The ledger is the balance source of truth. It stores balances by:
 
 `agent -> account -> resource`
 
-Cell fields such as `consumerMoney`, `laborStock`, `producerStock`, and
-`logisticsStock` are denormalized display mirrors. They should be treated as
-derived state and refreshed from the ledger, not as an agent API. `fieldBid` and
-`bidVolume` are different: they are logistics' running estimate of residual
+Ledger-backed display values such as consumer money, producer stock, farm food,
+and logistics stock are derived in `uiData.ts`, not stored on cells. `fieldBid`
+and `bidVolume` are different: they are logistics' running estimate of residual
 product demand, maintained by `agents.ts` from auction outcomes.
 
-Current limitation: the UI still reads these denormalized mirrors in several
-places. That is convenient, but it can obscure whether a value came from the
-ledger or from a display cache. Agent policies should use `PriceAgentApi`
-instead of reading the backing cell array.
+Agent policies should use `PriceAgentApi` instead of reading the backing cell
+array.

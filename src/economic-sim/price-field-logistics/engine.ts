@@ -5,34 +5,43 @@ import {
   type PriceFieldSource,
   type PriceFieldState,
 } from "./priceFieldAutomaton";
-import type { Account, Agent } from "../shared/types";
+import type { Account, Agent, MovedAccount } from "../shared/types";
 
 export type PriceResource = "money" | "product" | "food" | "labor" | "factory" | "farm";
-export type PriceMarketResource = "product" | "food" | "labor";
-export type PriceLogisticsResource = "product" | "food";
+export type MarketResource = "product" | "food" | "labor";
+export type LogisticsResource = "product" | "food";
 export type PriceAgent = Agent;
 
-export type PriceLogisticsCell = {
+export type Cell = {
   x: number;
   y: number;
   land: boolean;
-  consumerMoney: number;
   population: number;
   malnutritionBurden: number;
   foodConsumed: number;
-  laborStock: number;
   fieldBid: number;
   bidVolume: number;
   foodFieldBid: number;
   foodBidVolume: number;
-  producerStock: number;
-  producerFoodStock: number;
-  farmProducerFoodStock: number;
-  farmStock: number;
-  logisticsStock: number;
-  logisticsFoodStock: number;
-  movedStock: number;
   marketHistory: PriceMarketTickHistory[];
+  // Deprecated test-fixture compatibility fields. Engine logic ignores these;
+  // ledger-backed UI data lives in uiData.ts.
+  /** @deprecated */
+  consumerMoney?: number;
+  /** @deprecated */
+  laborStock?: number;
+  /** @deprecated */
+  producerStock?: number;
+  /** @deprecated */
+  producerFoodStock?: number;
+  /** @deprecated */
+  farmProducerFoodStock?: number;
+  /** @deprecated */
+  farmStock?: number;
+  /** @deprecated */
+  logisticsStock?: number;
+  /** @deprecated */
+  logisticsFoodStock?: number;
 };
 
 export type PriceLogisticsEvent =
@@ -41,27 +50,27 @@ export type PriceLogisticsEvent =
   | { kind: "move"; fromX: number; fromY: number; toX: number; toY: number; value: number }
   | { kind: "sell"; x: number; y: number; quantity: number; price: number };
 
-export type PriceOrder = {
+export type Order = {
   id: number;
   agent: PriceAgent;
   account: Account;
-  resource: PriceMarketResource;
+  resource: MarketResource;
   side: "bid" | "ask";
   price: number;
   quantity: number;
   remaining: number;
 };
 
-export type PriceOrderResult = Omit<PriceOrder, "remaining"> & {
+export type OrderResult = Omit<Order, "remaining"> & {
   filled: number;
   unfilled: number;
 };
 
-export type PriceTrade = {
+export type Trade = {
   x: number;
   y: number;
   account: Account;
-  resource: PriceMarketResource;
+  resource: MarketResource;
   buyer: PriceAgent;
   seller: PriceAgent;
   quantity: number;
@@ -69,42 +78,45 @@ export type PriceTrade = {
 };
 
 export type PriceMarketResourceHistory = {
-  orders: PriceOrderResult[];
-  trades: PriceTrade[];
+  orders: OrderResult[];
+  trades: Trade[];
 };
 
 export type PriceMarketTickHistory = {
   turn: number;
-  resources: Record<PriceMarketResource, PriceMarketResourceHistory>;
+  resources: Record<MarketResource, PriceMarketResourceHistory>;
 };
 
-export type PriceLedger = Partial<Record<PriceAgent, Partial<Record<Account, Partial<Record<PriceResource, number>>>>>>;
+export type Ledger = Partial<Record<PriceAgent, Partial<Record<Account, Partial<Record<PriceResource, number>>>>>>;
 export type PriceResourceBundle = Partial<Record<PriceResource, number>>;
 
-export type PriceRecipe = {
+export type Recipe = {
   id: string;
   inputs: PriceResourceBundle;
   requirements: PriceResourceBundle;
   outputs: PriceResourceBundle;
 };
 
-export type PriceLogisticsState = {
+export type State = {
   width: number;
   height: number;
   turn: number;
   nextOrderId: number;
-  ledger: PriceLedger;
-  orders: PriceOrder[];
-  lastOrderResults: PriceOrderResult[];
-  trades: PriceTrade[];
-  recipes: PriceRecipe[];
-  logisticsResources: PriceLogisticsResource[];
+  ledger: Ledger;
+  orders: Order[];
+  lastOrderResults: OrderResult[];
+  trades: Trade[];
+  recipes: Recipe[];
+  logisticsResources: LogisticsResource[];
+  /** @deprecated Ledger is the source of truth; use stateLedgerData(state).logisticsMoney for display. */
   money: number;
+  /** @deprecated Ledger is the source of truth; use stateLedgerData(state).producerMoney for display. */
   producerMoney: number;
+  /** @deprecated Ledger is the source of truth; use stateLedgerData(state).farmProducerMoney for display. */
   farmProducerMoney: number;
-  cells: PriceLogisticsCell[];
+  cells: Cell[];
   bidField: PriceFieldState;
-  bidFields: Record<PriceLogisticsResource, PriceFieldState>;
+  bidFields: Record<LogisticsResource, PriceFieldState>;
   events: PriceLogisticsEvent[];
 };
 
@@ -113,16 +125,16 @@ export type PriceAgentApi = {
   balance: (account: Account, resource: PriceResource) => number;
   balanceOf: (agent: PriceAgent, account: Account, resource: PriceResource) => number;
   accounts: () => Account[];
-  local: (account: Account) => PriceLogisticsCell | null;
-  placeBid: (account: Account, resource: PriceMarketResource, price: number, quantity: number) => void;
-  placeAsk: (account: Account, resource: PriceMarketResource, price: number, quantity: number) => void;
-  bestBid: (account: Account, resource: PriceMarketResource) => { price: number; quantity: number } | null;
-  bestAsk: (account: Account, resource: PriceMarketResource) => { price: number; quantity: number } | null;
-  recipes: () => PriceRecipe[];
-  moveResource: (resource: PriceLogisticsResource, from: Account, to: Account, value: number) => boolean;
+  local: (account: Account) => Cell | null;
+  placeBid: (account: Account, resource: MarketResource, price: number, quantity: number) => void;
+  placeAsk: (account: Account, resource: MarketResource, price: number, quantity: number) => void;
+  bestBid: (account: Account, resource: MarketResource) => { price: number; quantity: number } | null;
+  bestAsk: (account: Account, resource: MarketResource) => { price: number; quantity: number } | null;
+  recipes: () => Recipe[];
+  moveResource: (resource: LogisticsResource, from: Account, to: Account, value: number) => boolean;
   moveProduct: (from: Account, to: Account, value: number) => boolean;
-  diffusedBid: (account: Account, resource?: PriceLogisticsResource) => number;
-  bestMoveNeighbor: (account: Account, resource?: PriceLogisticsResource) => { account: Account; bid: number } | null;
+  diffusedBid: (account: Account, resource?: LogisticsResource) => number;
+  bestMoveNeighbor: (account: Account, resource?: LogisticsResource) => { account: Account; bid: number } | null;
   consumerAgentForAccount: (account: Account) => Agent | null;
 };
 
@@ -132,7 +144,7 @@ export type PriceAgentPolicy = {
 };
 
 export type PriceFieldStepWork = {
-  resource: PriceLogisticsResource;
+  resource: LogisticsResource;
   field: PriceFieldState;
   sources: PriceFieldSource[];
   land: boolean[];
@@ -142,15 +154,15 @@ export type PriceFieldStepWork = {
 
 export type PriceFieldBatchStepper = (
   work: PriceFieldStepWork[],
-) => Promise<Record<PriceLogisticsResource, PriceFieldState>>;
+) => Promise<Record<LogisticsResource, PriceFieldState>>;
 
 export type PriceStepProfiler = {
   record: (name: string, durationMs: number) => void;
 };
 
 export type PriceCellBehavior = {
-  fieldSources: (state: PriceLogisticsState, resource: PriceLogisticsResource) => PriceFieldSource[];
-  afterMarket: (state: PriceLogisticsState) => void;
+  fieldSources: (state: State, resource: LogisticsResource) => PriceFieldSource[];
+  afterMarket: (state: State) => void;
 };
 
 export const MOVE_COST = 1;
@@ -161,8 +173,8 @@ export const LOGISTICS_AGENT: Agent = "Logistics-0";
 export const PRODUCER_AGENT: Agent = "Producer";
 export const FARM_PRODUCER_AGENT: Agent = "FarmProducer";
 export const MONEY_ACCOUNT: Account = "";
-export const NORMAL_MORTALITY_PER_WEEK = 0.003;
-export const BASE_FERTILITY_PER_WEEK = 0.01;
+export const NORMAL_MORTALITY_PER_WEEK = 0.00016;
+export const BIRTH_RATE_PER_WEEK = 0.00032;
 export const SEA_TRAVEL_COST = Number.POSITIVE_INFINITY;
 
 function assertIntegerQuantity(value: number, label: string) {
@@ -179,27 +191,31 @@ export function accountOfCell(cell: { x: number; y: number }): Account {
   return `${cell.x},${cell.y}`;
 }
 
-export function logisticsCell(state: PriceLogisticsState, x: number, y: number) {
+export function movedAccountOfCell(cell: { x: number; y: number }): MovedAccount {
+  return `moved-${cell.x}-${cell.y}`;
+}
+
+export function logisticsCell(state: State, x: number, y: number) {
   return state.cells[index(state.width, x, y)];
 }
 
-function ensureAgent(ledger: PriceLedger, agent: PriceAgent) {
+function ensureAgent(ledger: Ledger, agent: PriceAgent) {
   ledger[agent] ??= {};
   return ledger[agent]!;
 }
 
-function ensureAccount(ledger: PriceLedger, agent: PriceAgent, account: Account) {
+function ensureAccount(ledger: Ledger, agent: PriceAgent, account: Account) {
   const agentLedger = ensureAgent(ledger, agent);
   agentLedger[account] ??= {};
   return agentLedger[account]!;
 }
 
-export function getLedgerBalance(ledger: PriceLedger, agent: PriceAgent, account: Account, resource: PriceResource) {
+export function getLedgerBalance(ledger: Ledger, agent: PriceAgent, account: Account, resource: PriceResource) {
   return ledger[agent]?.[account]?.[resource] ?? 0;
 }
 
 export function addLedgerBalance(
-  ledger: PriceLedger,
+  ledger: Ledger,
   agent: PriceAgent,
   account: Account,
   resource: PriceResource,
@@ -213,7 +229,7 @@ export function addLedgerBalance(
 }
 
 export function setLedgerBalance(
-  ledger: PriceLedger,
+  ledger: Ledger,
   agent: PriceAgent,
   account: Account,
   resource: PriceResource,
@@ -223,9 +239,9 @@ export function setLedgerBalance(
   ensureAccount(ledger, agent, account)[resource] = amount;
 }
 
-export function cloneLedger(ledger: PriceLedger): PriceLedger {
-  const next: PriceLedger = {};
-  for (const [agent, accounts] of Object.entries(ledger) as Array<[PriceAgent, NonNullable<PriceLedger[PriceAgent]>]>) {
+export function cloneLedger(ledger: Ledger): Ledger {
+  const next: Ledger = {};
+  for (const [agent, accounts] of Object.entries(ledger) as Array<[PriceAgent, NonNullable<Ledger[PriceAgent]>]>) {
     next[agent] = {};
     for (const [account, resources] of Object.entries(accounts) as Array<[Account, Partial<Record<PriceResource, number>>]>) {
       next[agent]![account] = { ...resources };
@@ -234,42 +250,35 @@ export function cloneLedger(ledger: PriceLedger): PriceLedger {
   return next;
 }
 
-export function consumerAgentForCell(cell: PriceLogisticsCell): Agent {
+export function consumerAgentForCell(cell: Cell): Agent {
   return `Consumer-${cell.x},${cell.y}`;
 }
 
-export function consumerAgentForAccount(state: PriceLogisticsState, account: Account): Agent | null {
+export function consumerAgentForAccount(state: State, account: Account): Agent | null {
   const cell = cellForAccount(state, account);
   return cell ? consumerAgentForCell(cell) : null;
 }
 
-function cellForAccount(state: PriceLogisticsState, account: Account) {
+function cellForAccount(state: State, account: Account) {
   const coord = parseAccount(account);
   if (!coord || coord.x < 0 || coord.x >= state.width || coord.y < 0 || coord.y >= state.height) return null;
   return logisticsCell(state, coord.x, coord.y);
 }
 
-function travelCost(state: PriceLogisticsState, from: { x: number; y: number }, to: { x: number; y: number }) {
+function travelCost(state: State, from: { x: number; y: number }, to: { x: number; y: number }) {
   const fromCell = logisticsCell(state, from.x, from.y);
   const toCell = logisticsCell(state, to.x, to.y);
   return fromCell.land && toCell.land ? 1 : SEA_TRAVEL_COST;
 }
 
-export function refreshCellBalances(state: PriceLogisticsState) {
-  state.money = getLedgerBalance(state.ledger, LOGISTICS_AGENT, MONEY_ACCOUNT, "money");
-  state.producerMoney = getLedgerBalance(state.ledger, PRODUCER_AGENT, MONEY_ACCOUNT, "money");
-  state.farmProducerMoney = getLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, MONEY_ACCOUNT, "money");
-  for (const cell of state.cells) {
-    const account = accountOfCell(cell);
-    const consumer = consumerAgentForCell(cell);
-    cell.consumerMoney = getLedgerBalance(state.ledger, consumer, MONEY_ACCOUNT, "money");
-    cell.laborStock = getLedgerBalance(state.ledger, consumer, account, "labor");
-    cell.producerStock = getLedgerBalance(state.ledger, PRODUCER_AGENT, account, "product");
-    cell.producerFoodStock = getLedgerBalance(state.ledger, PRODUCER_AGENT, account, "food");
-    cell.farmProducerFoodStock = getLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "food");
-    cell.farmStock = getLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "farm");
-    cell.logisticsStock = getLedgerBalance(state.ledger, LOGISTICS_AGENT, account, "product");
-    cell.logisticsFoodStock = getLedgerBalance(state.ledger, LOGISTICS_AGENT, account, "food");
+function releaseMovedResources(state: State, cell: Cell) {
+  const account = accountOfCell(cell);
+  const movedAccount = movedAccountOfCell(cell);
+  for (const resource of state.logisticsResources) {
+    const quantity = getLedgerBalance(state.ledger, LOGISTICS_AGENT, movedAccount, resource);
+    if (quantity <= 0) continue;
+    addLedgerBalance(state.ledger, LOGISTICS_AGENT, movedAccount, resource, -quantity);
+    addLedgerBalance(state.ledger, LOGISTICS_AGENT, account, resource, quantity);
   }
 }
 
@@ -284,11 +293,11 @@ function priceFieldOptions(land: boolean[], width: number) {
   };
 }
 
-function landMask(state: PriceLogisticsState) {
+function landMask(state: State) {
   return state.cells.map((cell) => cell.land);
 }
 
-function priceFieldStepWork(state: PriceLogisticsState, behavior: PriceCellBehavior): PriceFieldStepWork[] {
+function priceFieldStepWork(state: State, behavior: PriceCellBehavior): PriceFieldStepWork[] {
   const land = landMask(state);
   return state.logisticsResources.map((resource) => ({
     resource,
@@ -306,14 +315,14 @@ export function stepPriceFieldsSync(work: PriceFieldStepWork[]) {
       resource,
       stepPriceField(field, sources, priceFieldOptions(land, width)),
     ]),
-  ) as Record<PriceLogisticsResource, PriceFieldState>;
+  ) as Record<LogisticsResource, PriceFieldState>;
 }
 
-export function diffusedBid(state: PriceLogisticsState, x: number, y: number, resource: PriceLogisticsResource = "product") {
+export function diffusedBid(state: State, x: number, y: number, resource: LogisticsResource = "product") {
   return fieldCell(state.bidFields[resource], x, y).price;
 }
 
-export function bestMoveNeighbor(state: PriceLogisticsState, cell: PriceLogisticsCell, resource: PriceLogisticsResource = "product") {
+export function bestMoveNeighbor(state: State, cell: Cell, resource: LogisticsResource = "product") {
   let best: { x: number; y: number; bid: number } | null = null;
   for (const neighbor of fieldNeighbors(state, cell)) {
     if (!Number.isFinite(travelCost(state, cell, neighbor))) continue;
@@ -333,7 +342,7 @@ export function parseAccount(account: Account) {
   return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
 }
 
-function placeOrder(state: PriceLogisticsState, order: Omit<PriceOrder, "id" | "remaining">) {
+function placeOrder(state: State, order: Omit<Order, "id" | "remaining">) {
   if (order.quantity <= 0 || order.price < 0) return null;
   assertIntegerQuantity(order.quantity, `${order.agent} ${order.resource} order quantity`);
   if (order.side === "bid") {
@@ -347,8 +356,8 @@ function placeOrder(state: PriceLogisticsState, order: Omit<PriceOrder, "id" | "
   return placedOrder;
 }
 
-function bestOpenOrder(state: PriceLogisticsState, account: Account, resource: PriceMarketResource, side: "bid" | "ask") {
-  let best: PriceOrder | null = null;
+function bestOpenOrder(state: State, account: Account, resource: MarketResource, side: "bid" | "ask") {
+  let best: Order | null = null;
   for (const order of state.orders) {
     if (order.account !== account || order.resource !== resource || order.side !== side || order.remaining <= 0) continue;
     if (!best) {
@@ -364,10 +373,10 @@ function bestOpenOrder(state: PriceLogisticsState, account: Account, resource: P
   return best ? { price: best.price, quantity: best.remaining } : null;
 }
 
-function clearLocalAuctions(state: PriceLogisticsState, resources: PriceMarketResource[]) {
-  const trades: PriceTrade[] = [];
+function clearLocalAuctions(state: State, resources: MarketResource[]) {
+  const trades: Trade[] = [];
   const resourceSet = new Set(resources);
-  const grouped = new Map<string, { account: Account; resource: PriceMarketResource; bids: PriceOrder[]; asks: PriceOrder[] }>();
+  const grouped = new Map<string, { account: Account; resource: MarketResource; bids: Order[]; asks: Order[] }>();
 
   for (const order of state.orders) {
     if (!resourceSet.has(order.resource)) continue;
@@ -427,7 +436,7 @@ function clearLocalAuctions(state: PriceLogisticsState, resources: PriceMarketRe
   state.orders = [];
 }
 
-function emptyMarketResourceHistory(): Record<PriceMarketResource, PriceMarketResourceHistory> {
+function emptyMarketResourceHistory(): Record<MarketResource, PriceMarketResourceHistory> {
   return {
     product: { orders: [], trades: [] },
     food: { orders: [], trades: [] },
@@ -446,8 +455,8 @@ function cloneMarketHistory(history: PriceMarketTickHistory[]): PriceMarketTickH
   }));
 }
 
-function recordCellMarketHistory(state: PriceLogisticsState) {
-  const entriesByAccount = new Map<Account, Record<PriceMarketResource, PriceMarketResourceHistory>>();
+function recordCellMarketHistory(state: State) {
+  const entriesByAccount = new Map<Account, Record<MarketResource, PriceMarketResourceHistory>>();
   const ensureEntry = (account: Account) => {
     const entry = entriesByAccount.get(account) ?? emptyMarketResourceHistory();
     entriesByAccount.set(account, entry);
@@ -471,7 +480,7 @@ function recordCellMarketHistory(state: PriceLogisticsState) {
   }
 }
 
-function syncTradeEffects(state: PriceLogisticsState) {
+function syncTradeEffects(state: State) {
   for (const trade of state.trades) {
     const cell = logisticsCell(state, trade.x, trade.y);
     if (trade.resource === "product" && trade.buyer === LOGISTICS_AGENT && trade.seller === PRODUCER_AGENT) {
@@ -493,7 +502,7 @@ function syncTradeEffects(state: PriceLogisticsState) {
   }
 }
 
-function recipeQuantity(resources: Partial<Record<PriceResource, number>>, recipe: PriceRecipe) {
+function recipeQuantity(resources: Partial<Record<PriceResource, number>>, recipe: Recipe) {
   let quantity = Number.POSITIVE_INFINITY;
   for (const [resource, amount] of Object.entries(recipe.inputs) as Array<[PriceResource, number]>) {
     if (amount > 0) quantity = Math.min(quantity, Math.floor((resources[resource] ?? 0) / amount));
@@ -504,14 +513,14 @@ function recipeQuantity(resources: Partial<Record<PriceResource, number>>, recip
   return Number.isFinite(quantity) ? quantity : 0;
 }
 
-function agentCanRunRecipe(agent: PriceAgent, recipe: PriceRecipe) {
+function agentCanRunRecipe(agent: PriceAgent, recipe: Recipe) {
   if (agent === PRODUCER_AGENT) return (recipe.requirements.factory ?? 0) > 0;
   if (agent === FARM_PRODUCER_AGENT) return (recipe.requirements.farm ?? 0) > 0;
   return false;
 }
 
-function generateProducts(state: PriceLogisticsState) {
-  for (const [agent, accounts] of Object.entries(state.ledger) as Array<[PriceAgent, NonNullable<PriceLedger[PriceAgent]>]>) {
+function generateProducts(state: State) {
+  for (const [agent, accounts] of Object.entries(state.ledger) as Array<[PriceAgent, NonNullable<Ledger[PriceAgent]>]>) {
     if (agent !== PRODUCER_AGENT && agent !== FARM_PRODUCER_AGENT) continue;
     for (const [account, resources] of Object.entries(accounts) as Array<[Account, Partial<Record<PriceResource, number>>]>) {
       for (const recipe of state.recipes) {
@@ -533,11 +542,11 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-export function laborProductivity(cell: Pick<PriceLogisticsCell, "malnutritionBurden">) {
+export function laborProductivity(cell: Pick<Cell, "malnutritionBurden">) {
   return 1 - 0.6 * cell.malnutritionBurden ** 2;
 }
 
-function updateFoodAndPopulation(state: PriceLogisticsState) {
+function updateFoodAndPopulation(state: State) {
   for (const cell of state.cells) {
     const account = accountOfCell(cell);
     const consumer = consumerAgentForCell(cell);
@@ -549,7 +558,7 @@ function updateFoodAndPopulation(state: PriceLogisticsState) {
 
     const requiredFood = cell.population;
     const availableFood = getLedgerBalance(state.ledger, consumer, account, "food");
-    const consumed = Math.min(availableFood, Math.ceil(requiredFood * 1.5));
+    const consumed = Math.ceil(Math.min(availableFood, requiredFood * 1.5, requiredFood * (1+cell.malnutritionBurden)));
     if (consumed > 0) addLedgerBalance(state.ledger, consumer, account, "food", -consumed);
 
     const adequacy = consumed / requiredFood;
@@ -562,18 +571,18 @@ function updateFoodAndPopulation(state: PriceLogisticsState) {
       : clamp((burdenBeforeDeaths - starvationDeathRate) / (1 - starvationDeathRate), 0, 1);
 
     const mortality = NORMAL_MORTALITY_PER_WEEK + starvationDeathRate;
-    const fertility = BASE_FERTILITY_PER_WEEK * (1 - cell.malnutritionBurden) ** 2;
+    const fertility = BIRTH_RATE_PER_WEEK * (1 - cell.malnutritionBurden);
     cell.population = Math.max(0, cell.population * (1 - mortality + fertility));
   }
 }
 
-function createAgentApi(state: PriceLogisticsState, agent: PriceAgent): PriceAgentApi {
+function createAgentApi(state: State, agent: PriceAgent): PriceAgentApi {
   let accounts: Account[] | undefined;
   let bestOrders:
-    | Map<string, { bid?: PriceOrder; ask?: PriceOrder }>
+    | Map<string, { bid?: Order; ask?: Order }>
     | undefined;
-  const orderKey = (account: Account, resource: PriceMarketResource) => `${account}|${resource}`;
-  const isBetterOrder = (order: PriceOrder, current: PriceOrder | undefined) => {
+  const orderKey = (account: Account, resource: MarketResource) => `${account}|${resource}`;
+  const isBetterOrder = (order: Order, current: Order | undefined) => {
     if (!current) return true;
     if (order.side === "bid") return order.price > current.price || (order.price === current.price && order.id < current.id);
     return order.price < current.price || (order.price === current.price && order.id < current.id);
@@ -590,14 +599,14 @@ function createAgentApi(state: PriceLogisticsState, agent: PriceAgent): PriceAge
     }
     return bestOrders;
   };
-  const addIndexedOrder = (order: PriceOrder | null) => {
+  const addIndexedOrder = (order: Order | null) => {
     if (!order || !bestOrders) return;
     const key = orderKey(order.account, order.resource);
     const entry = bestOrders.get(key) ?? {};
     if (isBetterOrder(order, entry[order.side])) entry[order.side] = order;
     bestOrders.set(key, entry);
   };
-  const moveResource = (resource: PriceLogisticsResource, from: Account, to: Account, value: number) => {
+  const moveResource = (resource: LogisticsResource, from: Account, to: Account, value: number) => {
     const fromCell = cellForAccount(state, from);
     const toCell = cellForAccount(state, to);
     if (!fromCell || !toCell) return false;
@@ -606,8 +615,7 @@ function createAgentApi(state: PriceLogisticsState, agent: PriceAgent): PriceAge
     if (getLedgerBalance(state.ledger, agent, MONEY_ACCOUNT, "money") < MOVE_COST) return false;
     addLedgerBalance(state.ledger, agent, from, resource, -1);
     addLedgerBalance(state.ledger, agent, MONEY_ACCOUNT, "money", -MOVE_COST);
-    if (resource === "product") toCell.movedStock += 1;
-    else addLedgerBalance(state.ledger, agent, to, resource, 1);
+    addLedgerBalance(state.ledger, agent, movedAccountOfCell(toCell), resource, 1);
     state.events.push({ kind: "move", fromX: fromCell.x, fromY: fromCell.y, toX: toCell.x, toY: toCell.y, value });
     return true;
   };
@@ -663,12 +671,12 @@ async function profileAsync<T>(profiler: PriceStepProfiler | undefined, name: st
 }
 
 export function stepSimEngine(
-  state: PriceLogisticsState,
+  state: State,
   policies: PriceAgentPolicy[],
   behavior: PriceCellBehavior,
   profiler?: PriceStepProfiler,
-): PriceLogisticsState {
-  const next: PriceLogisticsState = profile(profiler, "cloneState", () => ({
+): State {
+  const next: State = profile(profiler, "cloneState", () => ({
     ...state,
     turn: state.turn + 1,
     nextOrderId: state.nextOrderId,
@@ -679,31 +687,16 @@ export function stepSimEngine(
     trades: [],
     events: [],
   }));
-  setLedgerBalance(next.ledger, LOGISTICS_AGENT, MONEY_ACCOUNT, "money", state.money);
-  setLedgerBalance(next.ledger, PRODUCER_AGENT, MONEY_ACCOUNT, "money", state.producerMoney);
-  setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, MONEY_ACCOUNT, "money", state.farmProducerMoney);
-
-  profile(profiler, "syncLedgerAndCells", () => {
+  profile(profiler, "prepareCellLedger", () => {
     for (const cell of next.cells) {
       const account = accountOfCell(cell);
       const consumer = consumerAgentForCell(cell);
-      setLedgerBalance(next.ledger, consumer, MONEY_ACCOUNT, "money", cell.consumerMoney);
-      setLedgerBalance(next.ledger, consumer, account, "labor", cell.laborStock);
-      setLedgerBalance(next.ledger, PRODUCER_AGENT, account, "product", cell.producerStock);
-      setLedgerBalance(next.ledger, PRODUCER_AGENT, account, "food", cell.producerFoodStock);
-      setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "food", cell.farmProducerFoodStock);
-      setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "farm", cell.farmStock);
-      setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "product", cell.logisticsStock);
-      setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "food", cell.logisticsFoodStock);
       const labor = getLedgerBalance(next.ledger, consumer, account, "labor");
       const generatedLabor = Math.floor(cell.population * laborProductivity(cell));
       setLedgerBalance(next.ledger, consumer, account, "labor", Math.min(12, labor + generatedLabor));
-      const moved = cell.movedStock;
-      if (moved > 0) addLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "product", moved);
-      cell.movedStock = 0;
+      releaseMovedResources(next, cell);
     }
   });
-  profile(profiler, "refreshBeforeFields", () => refreshCellBalances(next));
   next.bidFields = profile(profiler, "priceFields", () => stepPriceFieldsSync(priceFieldStepWork(next, behavior)));
   next.bidField = next.bidFields.product;
 
@@ -734,84 +727,6 @@ export function stepSimEngine(
   profile(profiler, "generateProducts", () => generateProducts(next));
   profile(profiler, "foodAndPopulation", () => updateFoodAndPopulation(next));
   profile(profiler, "afterMarket", () => behavior.afterMarket(next));
-  profile(profiler, "refreshAfterMarket", () => refreshCellBalances(next));
-  return next;
-}
-
-export async function stepSimAsync(
-  state: PriceLogisticsState,
-  policies: PriceAgentPolicy[],
-  behavior: PriceCellBehavior,
-  stepPriceFields: PriceFieldBatchStepper,
-  profiler?: PriceStepProfiler,
-): Promise<PriceLogisticsState> {
-  const next: PriceLogisticsState = profile(profiler, "cloneState", () => ({
-    ...state,
-    turn: state.turn + 1,
-    nextOrderId: state.nextOrderId,
-    ledger: cloneLedger(state.ledger),
-    cells: state.cells.map((cell) => ({ ...cell, marketHistory: cloneMarketHistory(cell.marketHistory) })),
-    orders: [],
-    lastOrderResults: [],
-    trades: [],
-    events: [],
-  }));
-  setLedgerBalance(next.ledger, LOGISTICS_AGENT, MONEY_ACCOUNT, "money", state.money);
-  setLedgerBalance(next.ledger, PRODUCER_AGENT, MONEY_ACCOUNT, "money", state.producerMoney);
-  setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, MONEY_ACCOUNT, "money", state.farmProducerMoney);
-
-  profile(profiler, "syncLedgerAndCells", () => {
-    for (const cell of next.cells) {
-      const account = accountOfCell(cell);
-      const consumer = consumerAgentForCell(cell);
-      setLedgerBalance(next.ledger, consumer, MONEY_ACCOUNT, "money", cell.consumerMoney);
-      setLedgerBalance(next.ledger, consumer, account, "labor", cell.laborStock);
-      setLedgerBalance(next.ledger, PRODUCER_AGENT, account, "product", cell.producerStock);
-      setLedgerBalance(next.ledger, PRODUCER_AGENT, account, "food", cell.producerFoodStock);
-      setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "food", cell.farmProducerFoodStock);
-      setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "farm", cell.farmStock);
-      setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "product", cell.logisticsStock);
-      setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "food", cell.logisticsFoodStock);
-      const labor = getLedgerBalance(next.ledger, consumer, account, "labor");
-      const generatedLabor = Math.floor(cell.population * laborProductivity(cell));
-      setLedgerBalance(next.ledger, consumer, account, "labor", Math.min(12, labor + generatedLabor));
-      const moved = cell.movedStock;
-      if (moved > 0) addLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "product", moved);
-      cell.movedStock = 0;
-    }
-  });
-  profile(profiler, "refreshBeforeFields", () => refreshCellBalances(next));
-  next.bidFields = await profileAsync(profiler, "priceFields", () => stepPriceFields(priceFieldStepWork(next, behavior)));
-  next.bidField = next.bidFields.product;
-
-  profile(profiler, "policies", () => {
-    let consumerPolicyStartedAt = profiler ? performance.now() : 0;
-    let consumerPolicyOpen = false;
-    for (const policy of policies) {
-      if (policy.agent.startsWith("Consumer-")) {
-        consumerPolicyOpen = true;
-        policy.run(createAgentApi(next, policy.agent));
-        continue;
-      }
-      if (consumerPolicyOpen) {
-        profiler?.record("policy:Consumers", performance.now() - consumerPolicyStartedAt);
-        consumerPolicyOpen = false;
-      }
-      profile(profiler, `policy:${policy.agent}`, () => policy.run(createAgentApi(next, policy.agent)));
-      consumerPolicyStartedAt = profiler ? performance.now() : 0;
-    }
-    if (consumerPolicyOpen) {
-      profiler?.record("policy:Consumers", performance.now() - consumerPolicyStartedAt);
-    }
-  });
-
-  profile(profiler, "clearLocalAuctions", () => clearLocalAuctions(next, ["labor", "product", "food"]));
-  profile(profiler, "recordCellMarketHistory", () => recordCellMarketHistory(next));
-  profile(profiler, "syncTradeEffects", () => syncTradeEffects(next));
-  profile(profiler, "generateProducts", () => generateProducts(next));
-  profile(profiler, "foodAndPopulation", () => updateFoodAndPopulation(next));
-  profile(profiler, "afterMarket", () => behavior.afterMarket(next));
-  profile(profiler, "refreshAfterMarket", () => refreshCellBalances(next));
   return next;
 }
 
@@ -827,7 +742,7 @@ export function runAuction({
   sellerWidget,
 }: {
   account: Account;
-  resource?: PriceMarketResource;
+  resource?: MarketResource;
   buyer: PriceAgent;
   seller: PriceAgent;
   bidPrice: number;
@@ -836,7 +751,7 @@ export function runAuction({
   buyerMoney: number;
   sellerWidget: number;
 }) {
-  const state: PriceLogisticsState = {
+  const state: State = {
     width: 1,
     height: 1,
     turn: 0,
@@ -854,22 +769,13 @@ export function runAuction({
       x: 0,
       y: 0,
       land: true,
-      consumerMoney: 0,
       population: 0,
       malnutritionBurden: 0,
       foodConsumed: 0,
-      laborStock: 0,
       fieldBid: 0,
       bidVolume: 0,
       foodFieldBid: 0,
       foodBidVolume: 0,
-      producerStock: 0,
-      producerFoodStock: 0,
-      farmProducerFoodStock: 0,
-      farmStock: 0,
-      logisticsStock: 0,
-      logisticsFoodStock: 0,
-      movedStock: 0,
       marketHistory: [],
     }],
     bidField: { width: 1, height: 1, turn: 0, cells: [] },

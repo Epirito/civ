@@ -9,16 +9,16 @@ import {
   consumerAgentForCell,
   getLedgerBalance,
   logisticsCell,
-  refreshCellBalances,
   setLedgerBalance,
   type PriceAgent,
-  type PriceLogisticsCell,
-  type PriceLogisticsState,
-  type PriceMarketResource,
+  type Cell,
+  type State,
+  type MarketResource,
   type PriceResource,
 } from "./engine";
 import { summarizePriceLogisticsState } from "./headlessBenchmark";
 import { createPriceLogisticsState } from "./scenario";
+import { cellLedgerData } from "./uiData";
 
 export type CellCoord = { x: number; y: number };
 
@@ -86,7 +86,7 @@ function sameCoord(left: CellCoord | null, right: CellCoord | null) {
   return !!left && !!right && left.x === right.x && left.y === right.y;
 }
 
-function validateCell(state: PriceLogisticsState, coord: CellCoord) {
+function validateCell(state: State, coord: CellCoord) {
   if (
     !Number.isInteger(coord.x) ||
     !Number.isInteger(coord.y) ||
@@ -99,7 +99,7 @@ function validateCell(state: PriceLogisticsState, coord: CellCoord) {
   }
 }
 
-function ledgerSnapshot(state: PriceLogisticsState, cell: PriceLogisticsCell): CellLedgerSnapshot {
+function ledgerSnapshot(state: State, cell: Cell): CellLedgerSnapshot {
   const account = accountOfCell(cell);
   const consumer = consumerAgentForCell(cell);
   const balanceSet = (agent: PriceAgent, ledgerAccount = account) =>
@@ -128,8 +128,8 @@ function ledgerSnapshot(state: PriceLogisticsState, cell: PriceLogisticsCell): C
 }
 
 function latestOrderPrice(
-  cell: PriceLogisticsCell,
-  resource: PriceMarketResource,
+  cell: Cell,
+  resource: MarketResource,
   side: "bid" | "ask",
   agent: PriceAgent,
 ) {
@@ -143,8 +143,8 @@ function latestOrderPrice(
 }
 
 function latestOrderTotals(
-  cell: PriceLogisticsCell,
-  resource: PriceMarketResource,
+  cell: Cell,
+  resource: MarketResource,
   side: "bid" | "ask",
   agents: PriceAgent[],
 ) {
@@ -163,7 +163,7 @@ function latestOrderTotals(
   return { filled: 0, unfilled: 0 };
 }
 
-export function createCellSnapshot(state: PriceLogisticsState, cell: PriceLogisticsCell): CellDebugSnapshot {
+export function createCellSnapshot(state: State, cell: Cell): CellDebugSnapshot {
   const account = accountOfCell(cell);
   const consumer = consumerAgentForCell(cell);
   return {
@@ -194,9 +194,9 @@ export function createCellSnapshot(state: PriceLogisticsState, cell: PriceLogist
       laborAsk: latestOrderTotals(cell, "labor", "ask", [consumer]),
     },
     logistics: {
-      productStock: cell.logisticsStock,
-      foodStock: cell.logisticsFoodStock,
-      movedProduct: cell.movedStock,
+      productStock: cellLedgerData(state, cell).logisticsProduct,
+      foodStock: cellLedgerData(state, cell).logisticsFood,
+      movedProduct: cellLedgerData(state, cell).movedProduct,
       productFieldBid: cell.fieldBid,
       productBidVolume: cell.bidVolume,
       foodFieldBid: cell.foodFieldBid,
@@ -264,7 +264,7 @@ export function createPriceLogisticsDebugSession(options: PriceLogisticsDebugSes
       validateCell(state, coord);
       return createCellSnapshot(state, logisticsCell(state, coord.x, coord.y));
     },
-    marketHistory(resource: PriceMarketResource, coord = selected) {
+    marketHistory(resource: MarketResource, coord = selected) {
       if (!coord) throw new Error("no selected cell");
       validateCell(state, coord);
       return logisticsCell(state, coord.x, coord.y).marketHistory.map((tick) => ({
@@ -291,16 +291,6 @@ export function createPriceLogisticsDebugSession(options: PriceLogisticsDebugSes
 function createEvalContext(session: PriceLogisticsDebugSession) {
   const cell = session.selectedCell();
   const account = cell ? accountOfCell(cell) : null;
-  const addBalance: typeof addLedgerBalance = (...args) => {
-    const result = addLedgerBalance(...args);
-    refreshCellBalances(session.state);
-    return result;
-  };
-  const setBalance: typeof setLedgerBalance = (...args) => {
-    const result = setLedgerBalance(...args);
-    refreshCellBalances(session.state);
-    return result;
-  };
   return {
     state: session.state,
     selected: cell,
@@ -314,8 +304,8 @@ function createEvalContext(session: PriceLogisticsDebugSession) {
     accountOfCell,
     consumerAgentForCell,
     getLedgerBalance,
-    setLedgerBalance: setBalance,
-    addLedgerBalance: addBalance,
+    setLedgerBalance,
+    addLedgerBalance,
     summary: () => session.summary(),
     MONEY_ACCOUNT,
     LOGISTICS_AGENT,

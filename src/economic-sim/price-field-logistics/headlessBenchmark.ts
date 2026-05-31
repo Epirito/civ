@@ -1,5 +1,5 @@
 import { stepAgentSim } from "./agents";
-import { LOGISTICS_AGENT, MONEY_ACCOUNT, getLedgerBalance, type PriceLogisticsState, type PriceResource } from "./engine";
+import { LOGISTICS_AGENT, MONEY_ACCOUNT, getLedgerBalance, type State, type PriceResource } from "./engine";
 import { createPriceLogisticsState } from "./scenario";
 
 export type PriceLogisticsBenchmarkOptions = {
@@ -64,7 +64,7 @@ function createBenchmarkProfiler() {
   };
 }
 
-function totalResource(state: PriceLogisticsState, resource: PriceResource) {
+function totalResource(state: State, resource: PriceResource) {
   let total = 0;
   for (const accounts of Object.values(state.ledger)) {
     if (!accounts) continue;
@@ -99,11 +99,11 @@ function fnv1a64(value: string) {
   return hash.toString(16).padStart(16, "0");
 }
 
-function stateHash(state: PriceLogisticsState) {
+function stateHash(state: State) {
   return fnv1a64(stableStringify(state));
 }
 
-function traceEntry(state: PriceLogisticsState): PriceLogisticsBenchmarkTraceEntry {
+function traceEntry(state: State): PriceLogisticsBenchmarkTraceEntry {
   return {
     turn: state.turn,
     stateHash: stateHash(state),
@@ -115,7 +115,7 @@ function traceEntry(state: PriceLogisticsState): PriceLogisticsBenchmarkTraceEnt
 }
 
 function profiledTraceEntry(
-  state: PriceLogisticsState,
+  state: State,
   profiler: ReturnType<typeof createBenchmarkProfiler> | undefined,
 ) {
   if (!profiler) return traceEntry(state);
@@ -125,7 +125,7 @@ function profiledTraceEntry(
   return entry;
 }
 
-export function summarizePriceLogisticsState(state: PriceLogisticsState) {
+export function summarizePriceLogisticsState(state: State) {
   return {
     finalTurn: state.turn,
     nextOrderId: state.nextOrderId,
