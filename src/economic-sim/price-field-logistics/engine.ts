@@ -554,9 +554,14 @@ function updateFoodAndPopulation(state: PriceLogisticsState) {
 
     const adequacy = consumed / requiredFood;
     cell.foodConsumed = consumed;
-    cell.malnutritionBurden = clamp(cell.malnutritionBurden + (1-adequacy) * (7 / 180) , 0, 1);
+    const burdenBeforeDeaths = clamp(cell.malnutritionBurden + (1 - adequacy) * (7 / 180), 0, 1);
 
-    const mortality = NORMAL_MORTALITY_PER_WEEK + 0.19 * cell.malnutritionBurden ** 4;
+    const starvationDeathRate = 0.19 * burdenBeforeDeaths ** 4;
+    cell.malnutritionBurden = starvationDeathRate >= 1
+      ? 0
+      : clamp((burdenBeforeDeaths - starvationDeathRate) / (1 - starvationDeathRate), 0, 1);
+
+    const mortality = NORMAL_MORTALITY_PER_WEEK + starvationDeathRate;
     const fertility = BASE_FERTILITY_PER_WEEK * (1 - cell.malnutritionBurden) ** 2;
     cell.population = Math.max(0, cell.population * (1 - mortality + fertility));
   }

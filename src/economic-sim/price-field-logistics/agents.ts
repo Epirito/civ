@@ -28,6 +28,7 @@ import type { Account } from "../shared/types";
 
 const LOGISTICS_DEMAND_ALPHA = 0.35;
 const LOGISTICS_DEMAND_DECAY = 0.9;
+const CONSUMER_FOOD_BUFFER_TURNS = 5;
 
 export function effectiveProductBidForBalance(cell: PriceLogisticsCell, consumerMoney: number) {
   return Math.min(adaptConsumerBid(cell), Math.floor(consumerMoney));
@@ -45,11 +46,20 @@ function productDemand(cell: PriceLogisticsCell, consumerMoney: number) {
   };
 }
 
-function foodDemand(cell: PriceLogisticsCell, consumerMoney: number) {
+function foodNeedPerTurn(cell: PriceLogisticsCell) {
+  return Math.ceil(cell.population * 1.5);
+}
+
+function consumerFoodTarget(cell: PriceLogisticsCell) {
+  return foodNeedPerTurn(cell) * (CONSUMER_FOOD_BUFFER_TURNS + 1);
+}
+
+function foodDemand(cell: PriceLogisticsCell, consumerMoney: number, currentFood: number) {
   const price = Math.min(adaptFoodBid(cell), Math.floor(consumerMoney));
+  const neededFood = Math.max(0, consumerFoodTarget(cell) - currentFood);
   return {
     price,
-    quantity: price > 0 ? Math.min(Math.ceil(cell.population * 1.5), Math.floor(consumerMoney / price)) : 0,
+    quantity: price > 0 ? Math.min(neededFood, Math.floor(consumerMoney / price)) : 0,
   };
 }
 
@@ -360,12 +370,16 @@ export function createConsumerPolicies(state: PriceLogisticsState): PriceAgentPo
           if (!local) return;
 
           const money = api.balance(MONEY_ACCOUNT, "money");
-          const { price: foodPrice, quantity: foodQuantity } = foodDemand(local, money);
+          const currentFood = api.balance(account, "food");
+          const foodTarget = consumerFoodTarget(local);
+          const { price: foodPrice, quantity: foodQuantity } = foodDemand(local, money, currentFood);
           if (foodQuantity > 0) api.placeBid(account, "food", foodPrice, foodQuantity);
 
           const remainingMoney = Math.max(0, money - foodPrice * foodQuantity);
-          const { price: effectiveBid, quantity: bidQuantity } = productDemand(local, remainingMoney);
-          if (bidQuantity > 0) api.placeBid(account, "product", effectiveBid, bidQuantity);
+          if (currentFood >= foodTarget) {
+            const { price: effectiveBid, quantity: bidQuantity } = productDemand(local, remainingMoney);
+            if (bidQuantity > 0) api.placeBid(account, "product", effectiveBid, bidQuantity);
+          }
 
           const labor = api.balance(account, "labor");
           const laborAsk = adaptLaborAsk(local);

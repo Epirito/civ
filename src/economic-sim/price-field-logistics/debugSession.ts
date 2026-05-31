@@ -142,6 +142,27 @@ function latestOrderPrice(
   return null;
 }
 
+function latestOrderTotals(
+  cell: PriceLogisticsCell,
+  resource: PriceMarketResource,
+  side: "bid" | "ask",
+  agents: PriceAgent[],
+) {
+  for (const tick of cell.marketHistory) {
+    if (tick.turn === 0) continue;
+    const orders = tick.resources[resource].orders.filter((order) =>
+      order.side === side && agents.includes(order.agent)
+    );
+    if (orders.length > 0) {
+      return {
+        filled: orders.reduce((sum, order) => sum + order.filled, 0),
+        unfilled: orders.reduce((sum, order) => sum + order.unfilled, 0),
+      };
+    }
+  }
+  return { filled: 0, unfilled: 0 };
+}
+
 export function createCellSnapshot(state: PriceLogisticsState, cell: PriceLogisticsCell): CellDebugSnapshot {
   const account = accountOfCell(cell);
   const consumer = consumerAgentForCell(cell);
@@ -165,12 +186,12 @@ export function createCellSnapshot(state: PriceLogisticsState, cell: PriceLogist
     },
     balances: ledgerSnapshot(state, cell),
     last: {
-      productBid: { filled: cell.lastBidFilled, unfilled: cell.lastBidUnfilled },
-      productAsk: { filled: cell.lastAskFilled, unfilled: cell.lastAskUnfilled },
-      foodBid: { filled: cell.lastFoodBidFilled, unfilled: cell.lastFoodBidUnfilled },
-      foodAsk: { filled: cell.lastFoodAskFilled, unfilled: cell.lastFoodAskUnfilled },
-      laborBid: { filled: cell.lastLaborBidFilled, unfilled: cell.lastLaborBidUnfilled },
-      laborAsk: { filled: cell.lastLaborFilled, unfilled: cell.lastLaborUnfilled },
+      productBid: latestOrderTotals(cell, "product", "bid", [consumer]),
+      productAsk: latestOrderTotals(cell, "product", "ask", [PRODUCER_AGENT]),
+      foodBid: latestOrderTotals(cell, "food", "bid", [consumer]),
+      foodAsk: latestOrderTotals(cell, "food", "ask", [FARM_PRODUCER_AGENT]),
+      laborBid: latestOrderTotals(cell, "labor", "bid", [PRODUCER_AGENT, FARM_PRODUCER_AGENT]),
+      laborAsk: latestOrderTotals(cell, "labor", "ask", [consumer]),
     },
     logistics: {
       productStock: cell.logisticsStock,

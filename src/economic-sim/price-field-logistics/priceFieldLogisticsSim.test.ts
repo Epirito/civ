@@ -95,6 +95,16 @@ function seedFarmLaborBid(cell: PriceLogisticsCell, price: number, result?: Part
   seedOrder(cell, "labor", "bid", FARM_PRODUCER_AGENT, price, result);
 }
 
+function addConsumerFoodBuffer(state: PriceLogisticsState, cell: PriceLogisticsCell) {
+  addLedgerBalance(
+    state.ledger,
+    consumerAgentForCell(cell),
+    accountOfCell(cell),
+    "food",
+    Math.ceil(cell.population * 1.5) * 6,
+  );
+}
+
 function addMarketOrder(
   cell: PriceLogisticsCell,
   resource: PriceMarketResource,
@@ -161,6 +171,7 @@ describe("price-field logistics sim", () => {
     seedConsumerProductBid(logisticsCell(state, 4, 0), 30);
     logisticsCell(state, 4, 0).consumerMoney = 120;
     logisticsCell(state, 4, 0).population = 4;
+    addConsumerFoodBuffer(state, logisticsCell(state, 4, 0));
 
     const next = stepTimes(state, 5);
 
@@ -175,6 +186,7 @@ describe("price-field logistics sim", () => {
     seedConsumerProductBid(logisticsCell(state, 4, 0), 30);
     logisticsCell(state, 4, 0).consumerMoney = 120;
     logisticsCell(state, 4, 0).population = 4;
+    addConsumerFoodBuffer(state, logisticsCell(state, 4, 0));
 
     const first = stepTimes(state, 5);
     const second = stepAgentSim(first);
@@ -192,6 +204,7 @@ describe("price-field logistics sim", () => {
     seedConsumerProductBid(logisticsCell(state, 4, 0), 30);
     logisticsCell(state, 4, 0).consumerMoney = 120;
     logisticsCell(state, 4, 0).population = 4;
+    addConsumerFoodBuffer(state, logisticsCell(state, 4, 0));
 
     const next = stepTimes(state, 6);
 
@@ -209,6 +222,7 @@ describe("price-field logistics sim", () => {
     seedConsumerProductBid(logisticsCell(state, 4, 0), 30);
     logisticsCell(state, 4, 0).consumerMoney = 120;
     logisticsCell(state, 4, 0).population = 4;
+    addConsumerFoodBuffer(state, logisticsCell(state, 4, 0));
 
     const next = stepAgentSim(state);
 
@@ -222,6 +236,7 @@ describe("price-field logistics sim", () => {
     seedConsumerProductBid(logisticsCell(state, 2, 0), 12);
     logisticsCell(state, 2, 0).consumerMoney = 12;
     logisticsCell(state, 2, 0).population = 1;
+    addConsumerFoodBuffer(state, logisticsCell(state, 2, 0));
     logisticsCell(state, 2, 0).logisticsStock = 1;
 
     const next = stepAgentSim(state);
@@ -251,6 +266,7 @@ describe("price-field logistics sim", () => {
     seedConsumerProductBid(logisticsCell(state, 2, 0), 10);
     logisticsCell(state, 2, 0).consumerMoney = 25;
     logisticsCell(state, 2, 0).population = 4;
+    addConsumerFoodBuffer(state, logisticsCell(state, 2, 0));
 
     const next = stepAgentSim(state);
 
@@ -263,6 +279,7 @@ describe("price-field logistics sim", () => {
     seedConsumerProductBid(logisticsCell(state, 2, 0), 20);
     logisticsCell(state, 2, 0).consumerMoney = 7;
     logisticsCell(state, 2, 0).population = 3;
+    addConsumerFoodBuffer(state, logisticsCell(state, 2, 0));
     logisticsCell(state, 2, 0).logisticsStock = 1;
 
     const next = stepAgentSim(state);
@@ -277,6 +294,7 @@ describe("price-field logistics sim", () => {
     seedConsumerProductBid(logisticsCell(state, 4, 0), 12);
     logisticsCell(state, 4, 0).consumerMoney = 12;
     logisticsCell(state, 4, 0).population = 1;
+    addConsumerFoodBuffer(state, logisticsCell(state, 4, 0));
 
     const first = stepAgentSim(state);
     const second = stepAgentSim(first);
@@ -298,6 +316,7 @@ describe("price-field logistics sim", () => {
     seedConsumerProductBid(logisticsCell(state, 2, 0), 30);
     logisticsCell(state, 2, 0).consumerMoney = 120;
     logisticsCell(state, 2, 0).population = 4;
+    addConsumerFoodBuffer(state, logisticsCell(state, 2, 0));
 
     const next = stepTimes(state, 5);
 
@@ -311,6 +330,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(unfilled, 0, 0).population = 2;
     seedConsumerProductBid(logisticsCell(unfilled, 0, 0), 10, { unfilled: 2 });
     logisticsCell(unfilled, 0, 0).consumerMoney = 24;
+    addConsumerFoodBuffer(unfilled, logisticsCell(unfilled, 0, 0));
 
     const raised = stepAgentSim(unfilled);
     expect(raised.lastOrderResults.some((order) => order.resource === "product" && order.side === "bid" && order.price === 12)).toBe(true);
@@ -319,6 +339,7 @@ describe("price-field logistics sim", () => {
     logisticsCell(filled, 0, 0).population = 1;
     seedConsumerProductBid(logisticsCell(filled, 0, 0), 10, { filled: 1 });
     logisticsCell(filled, 0, 0).consumerMoney = 8;
+    addConsumerFoodBuffer(filled, logisticsCell(filled, 0, 0));
 
     const lowered = stepAgentSim(filled);
     expect(lowered.lastOrderResults.some((order) => order.resource === "product" && order.side === "bid" && order.price === 8)).toBe(true);
@@ -394,6 +415,7 @@ describe("price-field logistics sim", () => {
     bidCell.population = 1;
     seedConsumerProductBid(bidCell, 10);
     bidCell.consumerMoney = 10;
+    addConsumerFoodBuffer(bidState, bidCell);
     addMarketOrder(bidCell, "product", "ask", PRODUCER_AGENT, 7, { unfilled: 1 });
 
     const jumpedBid = stepAgentSim(bidState);
@@ -537,9 +559,40 @@ describe("price-field logistics sim", () => {
     addLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "food", 1);
 
     const next = stepAgentSim(state);
+    expect(next.lastOrderResults.some((order) => order.resource === "product" && order.side === "bid" && order.filled > 0)).toBe(false);
     expect(getLedgerBalance(next.ledger, consumer, account, "food")).toBe(0);
     expect(logisticsCell(next, 0, 0).foodConsumed).toBe(1);
     expect(logisticsCell(next, 0, 0).consumerMoney).toBe(0);
+  });
+
+  it("only buys factory products after the local food buffer is full", () => {
+    const hungry = emptyState(1, 1);
+    const hungryCell = logisticsCell(hungry, 0, 0);
+    hungryCell.population = 1;
+    seedConsumerFoodBid(hungryCell, 10);
+    seedConsumerProductBid(hungryCell, 10);
+    seedFarmFoodAsk(hungryCell, 10);
+    hungryCell.consumerMoney = 60;
+    hungryCell.farmProducerFoodStock = 6;
+    hungryCell.logisticsStock = 1;
+    addLedgerBalance(hungry.ledger, FARM_PRODUCER_AGENT, accountOfCell(hungryCell), "food", 6);
+
+    const stillStockingFood = stepAgentSim(hungry);
+    expect(stillStockingFood.lastOrderResults.some((order) => order.resource === "food" && order.side === "bid" && order.filled > 0)).toBe(true);
+    expect(stillStockingFood.lastOrderResults.some((order) => order.resource === "product" && order.side === "bid")).toBe(false);
+
+    const buffered = emptyState(1, 1);
+    const bufferedCell = logisticsCell(buffered, 0, 0);
+    bufferedCell.population = 1;
+    seedConsumerFoodBid(bufferedCell, 10);
+    seedConsumerProductBid(bufferedCell, 10);
+    bufferedCell.consumerMoney = 10;
+    bufferedCell.logisticsStock = 1;
+    addConsumerFoodBuffer(buffered, bufferedCell);
+
+    const buyingProducts = stepAgentSim(buffered);
+    expect(buyingProducts.lastOrderResults.some((order) => order.resource === "food" && order.side === "bid")).toBe(false);
+    expect(buyingProducts.lastOrderResults.some((order) => order.resource === "product" && order.side === "bid" && order.filled === 1)).toBe(true);
   });
 
   it("raises malnutrition burden and mortality when food is missing", () => {
@@ -553,6 +606,23 @@ describe("price-field logistics sim", () => {
     expect(logisticsCell(next, 0, 0).foodConsumed).toBe(0);
     expect(logisticsCell(next, 0, 0).malnutritionBurden).toBe(1);
     expect(logisticsCell(next, 0, 0).population).toBeLessThan(9);
+  });
+
+  it("cools survivor malnutrition by removing starvation deaths from the fully malnourished tail", () => {
+    const state = emptyState(1, 1);
+    const cell = logisticsCell(state, 0, 0);
+    cell.population = 10;
+    cell.malnutritionBurden = 0.8;
+
+    const burdenBeforeDeaths = Math.min(1, 0.8 + 7 / 180);
+    const starvationDeathRate = 0.19 * burdenBeforeDeaths ** 4;
+    const expectedBurden = (burdenBeforeDeaths - starvationDeathRate) / (1 - starvationDeathRate);
+
+    const next = stepAgentSim(state);
+
+    expect(logisticsCell(next, 0, 0).foodConsumed).toBe(0);
+    expect(logisticsCell(next, 0, 0).malnutritionBurden).toBeCloseTo(expectedBurden);
+    expect(logisticsCell(next, 0, 0).malnutritionBurden).toBeLessThan(burdenBeforeDeaths);
   });
 
   it("rejects fractional ledger quantities", () => {
