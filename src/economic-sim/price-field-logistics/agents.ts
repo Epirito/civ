@@ -195,7 +195,6 @@ function adaptLaborBid(cell: PriceLogisticsCell, agent: typeof PRODUCER_AGENT | 
     cell,
     resource: "labor",
     ownsOrder: (order) => order.agent === agent,
-    filledStep: cell.lastLaborBidUnfilled === 0 ? 2 : 1,
   });
 }
 

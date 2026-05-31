@@ -142,18 +142,6 @@ function emptyState(width = 5, height = 1): PriceLogisticsState {
     cell.logisticsStock = 0;
     cell.logisticsFoodStock = 0;
     cell.movedStock = 0;
-    cell.lastBidFilled = 0;
-    cell.lastBidUnfilled = 0;
-    cell.lastFoodBidFilled = 0;
-    cell.lastFoodBidUnfilled = 0;
-    cell.lastLaborBidFilled = 0;
-    cell.lastLaborBidUnfilled = 0;
-    cell.lastLaborFilled = 0;
-    cell.lastLaborUnfilled = 0;
-    cell.lastAskFilled = 0;
-    cell.lastAskUnfilled = 0;
-    cell.lastFoodAskFilled = 0;
-    cell.lastFoodAskUnfilled = 0;
   }
   return state;
 }
@@ -254,7 +242,6 @@ describe("price-field logistics sim", () => {
 
     const next = stepAgentSim(state);
 
-    expect(logisticsCell(next, 2, 0).lastBidFilled).toBe(0);
     expect(logisticsCell(next, 2, 0).bidVolume).toBe(0);
     expect(logisticsCell(next, 2, 0).consumerMoney).toBe(0);
   });
@@ -280,7 +267,6 @@ describe("price-field logistics sim", () => {
 
     const next = stepAgentSim(state);
 
-    expect(logisticsCell(next, 2, 0).lastBidFilled).toBe(1);
     expect(logisticsCell(next, 2, 0).consumerMoney).toBe(0);
     expect(effectiveProductBid(logisticsCell(next, 2, 0))).toBe(0);
     expect(next.events).toContainEqual(expect.objectContaining({ kind: "sell", price: 7 }));
@@ -438,7 +424,6 @@ describe("price-field logistics sim", () => {
 
     expect(next.events.some((event) => event.kind === "labor" && event.x === 0 && event.y === 0)).toBe(true);
     expect(logisticsCell(next, 0, 0).producerStock).toBe(1);
-    expect(logisticsCell(next, 0, 0).lastLaborFilled).toBe(1);
     expect(next.producerMoney).toBeLessThan(state.producerMoney);
     expect(logisticsCell(next, 0, 0).consumerMoney).toBeGreaterThan(0);
   });
@@ -552,9 +537,6 @@ describe("price-field logistics sim", () => {
     addLedgerBalance(state.ledger, FARM_PRODUCER_AGENT, account, "food", 1);
 
     const next = stepAgentSim(state);
-
-    expect(logisticsCell(next, 0, 0).lastFoodBidFilled).toBe(1);
-    expect(logisticsCell(next, 0, 0).lastBidFilled).toBe(0);
     expect(getLedgerBalance(next.ledger, consumer, account, "food")).toBe(0);
     expect(logisticsCell(next, 0, 0).foodConsumed).toBe(1);
     expect(logisticsCell(next, 0, 0).consumerMoney).toBe(0);

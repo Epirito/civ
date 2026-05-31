@@ -32,18 +32,6 @@ export type PriceLogisticsCell = {
   logisticsStock: number;
   logisticsFoodStock: number;
   movedStock: number;
-  lastBidFilled: number;
-  lastBidUnfilled: number;
-  lastFoodBidFilled: number;
-  lastFoodBidUnfilled: number;
-  lastLaborBidFilled: number;
-  lastLaborBidUnfilled: number;
-  lastLaborFilled: number;
-  lastLaborUnfilled: number;
-  lastAskFilled: number;
-  lastAskUnfilled: number;
-  lastFoodAskFilled: number;
-  lastFoodAskUnfilled: number;
   marketHistory: PriceMarketTickHistory[];
 };
 
@@ -166,7 +154,7 @@ export type PriceCellBehavior = {
 };
 
 export const MOVE_COST = 1;
-export const MAX_OPTIONS_PER_TURN = 120;
+export const MAX_OPTIONS_PER_TURN = Infinity;
 export const MIN_PRICE = 1;
 export const MAX_PRICE = 32;
 export const LOGISTICS_AGENT: Agent = "Logistics-0";
@@ -484,33 +472,15 @@ function recordCellMarketHistory(state: PriceLogisticsState) {
 }
 
 function syncTradeEffects(state: PriceLogisticsState) {
-  for (const cell of state.cells) {
-    cell.lastBidFilled = 0;
-    cell.lastBidUnfilled = 0;
-    cell.lastFoodBidFilled = 0;
-    cell.lastFoodBidUnfilled = 0;
-    cell.lastLaborBidFilled = 0;
-    cell.lastLaborBidUnfilled = 0;
-    cell.lastLaborFilled = 0;
-    cell.lastLaborUnfilled = 0;
-    cell.lastAskFilled = 0;
-    cell.lastAskUnfilled = 0;
-    cell.lastFoodAskFilled = 0;
-    cell.lastFoodAskUnfilled = 0;
-  }
   for (const trade of state.trades) {
     const cell = logisticsCell(state, trade.x, trade.y);
     if (trade.resource === "product" && trade.buyer === LOGISTICS_AGENT && trade.seller === PRODUCER_AGENT) {
-      cell.lastAskFilled += trade.quantity;
       state.events.push({ kind: "buy", x: trade.x, y: trade.y, quantity: trade.quantity, price: trade.price });
     }
     if (trade.resource === "product" && trade.buyer === consumerAgentForCell(cell) && trade.seller === LOGISTICS_AGENT) {
-      cell.lastBidFilled += trade.quantity;
       state.events.push({ kind: "sell", x: trade.x, y: trade.y, quantity: trade.quantity, price: trade.price });
     }
     if (trade.resource === "food" && trade.buyer === consumerAgentForCell(cell)) {
-      cell.lastFoodBidFilled += trade.quantity;
-      if (trade.seller === PRODUCER_AGENT || trade.seller === FARM_PRODUCER_AGENT) cell.lastFoodAskFilled += trade.quantity;
       state.events.push({ kind: "sell", x: trade.x, y: trade.y, quantity: trade.quantity, price: trade.price });
     }
     if (
@@ -518,40 +488,7 @@ function syncTradeEffects(state: PriceLogisticsState) {
       (trade.buyer === PRODUCER_AGENT || trade.buyer === FARM_PRODUCER_AGENT) &&
       trade.seller === consumerAgentForCell(cell)
     ) {
-      cell.lastLaborBidFilled += trade.quantity;
-      cell.lastLaborFilled += trade.quantity;
       state.events.push({ kind: "labor", x: trade.x, y: trade.y, quantity: trade.quantity, price: trade.price });
-    }
-  }
-  for (const result of state.lastOrderResults) {
-    const coord = parseAccount(result.account);
-    if (!coord || result.unfilled <= 0) continue;
-    const cell = logisticsCell(state, coord.x, coord.y);
-    if (result.resource === "product" && result.side === "bid" && result.agent === consumerAgentForCell(cell)) {
-      cell.lastBidUnfilled += result.unfilled;
-    }
-    if (result.resource === "product" && result.side === "ask" && result.agent === PRODUCER_AGENT) {
-      cell.lastAskUnfilled += result.unfilled;
-    }
-    if (result.resource === "food" && result.side === "bid" && result.agent === consumerAgentForCell(cell)) {
-      cell.lastFoodBidUnfilled += result.unfilled;
-    }
-    if (
-      result.resource === "food" &&
-      result.side === "ask" &&
-      (result.agent === PRODUCER_AGENT || result.agent === FARM_PRODUCER_AGENT)
-    ) {
-      cell.lastFoodAskUnfilled += result.unfilled;
-    }
-    if (result.resource === "labor" && result.side === "ask" && result.agent === consumerAgentForCell(cell)) {
-      cell.lastLaborUnfilled += result.unfilled;
-    }
-    if (
-      result.resource === "labor" &&
-      result.side === "bid" &&
-      (result.agent === PRODUCER_AGENT || result.agent === FARM_PRODUCER_AGENT)
-    ) {
-      cell.lastLaborBidUnfilled += result.unfilled;
     }
   }
 }
@@ -928,18 +865,6 @@ export function runAuction({
       logisticsStock: 0,
       logisticsFoodStock: 0,
       movedStock: 0,
-      lastBidFilled: 0,
-      lastBidUnfilled: 0,
-      lastFoodBidFilled: 0,
-      lastFoodBidUnfilled: 0,
-      lastLaborBidFilled: 0,
-      lastLaborBidUnfilled: 0,
-      lastLaborFilled: 0,
-      lastLaborUnfilled: 0,
-      lastAskFilled: 0,
-      lastAskUnfilled: 0,
-      lastFoodAskFilled: 0,
-      lastFoodAskUnfilled: 0,
       marketHistory: [],
     }],
     bidField: { width: 1, height: 1, turn: 0, cells: [] },
