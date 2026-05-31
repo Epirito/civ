@@ -18,6 +18,7 @@ import {
   type PriceLogisticsResource,
   type PriceLogisticsState,
   type PriceMarketResource,
+  type PriceOrderResult,
   type PriceRecipe,
   type PriceResource,
   type PriceStepProfiler,
@@ -29,8 +30,7 @@ const LOGISTICS_DEMAND_ALPHA = 0.35;
 const LOGISTICS_DEMAND_DECAY = 0.9;
 
 export function effectiveProductBidForBalance(cell: PriceLogisticsCell, consumerMoney: number) {
-  if (cell.population <= 0 || cell.localBid <= 0) return 0;
-  return Math.min(cell.localBid, Math.floor(consumerMoney));
+  return Math.min(adaptConsumerBid(cell), Math.floor(consumerMoney));
 }
 
 export function effectiveProductBid(cell: PriceLogisticsCell) {
@@ -38,7 +38,7 @@ export function effectiveProductBid(cell: PriceLogisticsCell) {
 }
 
 function productDemand(cell: PriceLogisticsCell, consumerMoney: number) {
-  const price = effectiveProductBidForBalance(cell, consumerMoney);
+  const price = Math.min(adaptConsumerBid(cell), Math.floor(consumerMoney));
   return {
     price,
     quantity: price > 0 ? Math.min(Math.floor(cell.population), Math.floor(consumerMoney / price)) : 0,
@@ -46,55 +46,173 @@ function productDemand(cell: PriceLogisticsCell, consumerMoney: number) {
 }
 
 function foodDemand(cell: PriceLogisticsCell, consumerMoney: number) {
-  if (cell.population <= 0 || cell.foodBid <= 0) return { price: 0, quantity: 0 };
-  const price = Math.min(cell.foodBid, Math.floor(consumerMoney));
+  const price = Math.min(adaptFoodBid(cell), Math.floor(consumerMoney));
   return {
     price,
     quantity: price > 0 ? Math.min(Math.ceil(cell.population * 1.5), Math.floor(consumerMoney / price)) : 0,
   };
 }
 
+function clampPrice(price: number) {
+  return Math.max(MIN_PRICE, Math.min(MAX_PRICE, Math.round(price)));
+}
+
+function orderQuantity(orders: PriceOrderResult[], field: "filled" | "unfilled") {
+  return orders.reduce((sum, order) => sum + order[field], 0);
+}
+
+function ownOrders(
+  cell: PriceLogisticsCell,
+  resource: PriceMarketResource,
+  side: "bid" | "ask",
+  ownsOrder: (order: PriceOrderResult) => boolean,
+) {
+  return [...cell.marketHistory]
+    .reverse()
+    .flatMap((tick) => tick.resources[resource].orders)
+    .filter((order) => order.side === side && ownsOrder(order));
+}
+
+function initialQuote(
+  cell: PriceLogisticsCell,
+  resource: PriceMarketResource,
+  side: "bid" | "ask",
+  ownsOrder: (order: PriceOrderResult) => boolean,
+) {
+  return ownOrders(cell, resource, side, ownsOrder)[0]?.price ?? 0;
+}
+
+function matchingUnfilledOppositePrice(
+  orders: PriceOrderResult[],
+  side: "bid" | "ask",
+  price: number,
+) {
+  const oppositeSide = side === "bid" ? "ask" : "bid";
+  const opposite = orders.filter((order) => order.side === oppositeSide && order.unfilled > 0);
+  if (side === "bid") {
+    return opposite
+      .filter((order) => order.price < price)
+      .sort((a, b) => a.price - b.price)[0]?.price;
+  }
+  return opposite
+    .filter((order) => order.price > price)
+    .sort((a, b) => b.price - a.price)[0]?.price;
+}
+
+function adaptBidFromHistory({
+  cell,
+  resource,
+  ownsOrder,
+  filledStep = 2,
+  unfilledStep = 2,
+}: {
+  cell: PriceLogisticsCell;
+  resource: PriceMarketResource;
+  ownsOrder: (order: PriceOrderResult) => boolean;
+  filledStep?: number;
+  unfilledStep?: number;
+}) {
+  const base = initialQuote(cell, resource, "bid", ownsOrder);
+  if (base <= 0) return 0;
+  let price = clampPrice(base);
+  const history = [...cell.marketHistory].reverse();
+  for (const tick of history) {
+    const orders = tick.resources[resource].orders;
+    const match = matchingUnfilledOppositePrice(orders, "bid", price);
+    if (match !== undefined) {
+      price = clampPrice(match);
+      continue;
+    }
+    const own = orders.filter((order) => order.side === "bid" && ownsOrder(order));
+    const unfilled = orderQuantity(own, "unfilled");
+    const filled = orderQuantity(own, "filled");
+    if (unfilled > 0) price = clampPrice(price + unfilledStep);
+    else if (filled > 0) price = clampPrice(price - filledStep);
+  }
+  return price;
+}
+
+function adaptAskFromHistory({
+  cell,
+  resource,
+  ownsOrder,
+}: {
+  cell: PriceLogisticsCell;
+  resource: PriceMarketResource;
+  ownsOrder: (order: PriceOrderResult) => boolean;
+}) {
+  const base = initialQuote(cell, resource, "ask", ownsOrder);
+  if (base <= 0) return 0;
+  let price = clampPrice(base);
+  const history = [...cell.marketHistory].reverse();
+  for (const tick of history) {
+    const orders = tick.resources[resource].orders;
+    const match = matchingUnfilledOppositePrice(orders, "ask", price);
+    if (match !== undefined) {
+      price = clampPrice(match);
+      continue;
+    }
+    const own = orders.filter((order) => order.side === "ask" && ownsOrder(order));
+    const unfilled = orderQuantity(own, "unfilled");
+    const filled = orderQuantity(own, "filled");
+    if (unfilled > 0 && filled === 0) price = clampPrice(price - 1);
+    else if (filled > 0) price = clampPrice(price + (unfilled === 0 ? 2 : 1));
+  }
+  return price;
+}
+
 function adaptConsumerBid(cell: PriceLogisticsCell) {
-  if (cell.population <= 0 || cell.localBid <= 0) return 0;
-  if (cell.lastBidUnfilled > 0) return Math.min(MAX_PRICE, cell.localBid + 2);
-  if (cell.lastBidFilled > 0) return Math.max(MIN_PRICE, cell.localBid - 2);
-  return cell.localBid;
+  if (cell.population <= 0) return 0;
+  return adaptBidFromHistory({
+    cell,
+    resource: "product",
+    ownsOrder: (order) => order.agent === consumerAgentForCell(cell),
+  });
 }
 
 function adaptFoodBid(cell: PriceLogisticsCell) {
-  if (cell.population <= 0 || cell.foodBid <= 0) return 0;
-  if (cell.lastFoodBidUnfilled > 0 || cell.malnutritionBurden > 0.2) return Math.min(MAX_PRICE, cell.foodBid + 2);
-  if (cell.lastFoodBidFilled > 0 && cell.malnutritionBurden < 0.05) return Math.max(MIN_PRICE, cell.foodBid - 1);
-  return cell.foodBid;
+  if (cell.population <= 0) return 0;
+  const price = adaptBidFromHistory({
+    cell,
+    resource: "food",
+    ownsOrder: (order) => order.agent === consumerAgentForCell(cell),
+    filledStep: cell.malnutritionBurden < 0.05 ? 1 : 0,
+  });
+  return cell.malnutritionBurden > 0.2 ? clampPrice(price + 2) : price;
 }
 
 function adaptLaborAsk(cell: PriceLogisticsCell) {
-  if (cell.population <= 0 || cell.laborAsk <= 0) return 0;
-  if (cell.lastLaborUnfilled > 0 && cell.lastLaborFilled === 0) return Math.max(MIN_PRICE, cell.laborAsk - 1);
-  if (cell.lastLaborFilled > 0) return Math.min(MAX_PRICE, cell.laborAsk + (cell.lastLaborUnfilled === 0 ? 2 : 1));
-  return cell.laborAsk;
+  if (cell.population <= 0) return 0;
+  return adaptAskFromHistory({
+    cell,
+    resource: "labor",
+    ownsOrder: (order) => order.agent === consumerAgentForCell(cell),
+  });
 }
 
-function adaptLaborBid(cell: PriceLogisticsCell) {
-  if (cell.localAsk <= 0 && cell.foodAsk <= 0) return 0;
-  const current = cell.laborBid > 0 ? cell.laborBid : Math.max(MIN_PRICE, cell.laborAsk);
-  if (cell.lastLaborBidUnfilled > 0) return Math.min(MAX_PRICE, current + 2);
-  if (cell.lastLaborBidFilled > 0) return Math.max(MIN_PRICE, current - (cell.lastLaborBidUnfilled === 0 ? 2 : 1));
-  return current;
+function adaptLaborBid(cell: PriceLogisticsCell, agent: typeof PRODUCER_AGENT | typeof FARM_PRODUCER_AGENT) {
+  return adaptBidFromHistory({
+    cell,
+    resource: "labor",
+    ownsOrder: (order) => order.agent === agent,
+    filledStep: cell.lastLaborBidUnfilled === 0 ? 2 : 1,
+  });
 }
 
 function adaptProducerAsk(cell: PriceLogisticsCell) {
-  if (cell.localAsk <= 0) return 0;
-  if (cell.lastAskFilled === 0 && cell.lastAskUnfilled > 0) return Math.max(MIN_PRICE, cell.localAsk - 1);
-  if (cell.lastAskFilled > 0) return Math.min(MAX_PRICE, cell.localAsk + (cell.lastAskUnfilled === 0 ? 2 : 1));
-  return cell.localAsk;
+  return adaptAskFromHistory({
+    cell,
+    resource: "product",
+    ownsOrder: (order) => order.agent === PRODUCER_AGENT,
+  });
 }
 
 function adaptFoodAsk(cell: PriceLogisticsCell) {
-  if (cell.foodAsk <= 0) return 0;
-  if (cell.lastFoodAskFilled === 0 && cell.lastFoodAskUnfilled > 0) return Math.max(MIN_PRICE, cell.foodAsk - 1);
-  if (cell.lastFoodAskFilled > 0) return Math.min(MAX_PRICE, cell.foodAsk + (cell.lastFoodAskUnfilled === 0 ? 2 : 1));
-  return cell.foodAsk;
+  return adaptAskFromHistory({
+    cell,
+    resource: "food",
+    ownsOrder: (order) => order.agent === PRODUCER_AGENT || order.agent === FARM_PRODUCER_AGENT,
+  });
 }
 
 function logisticResidualDemandSources(state: PriceLogisticsState, resource: PriceMarketResource): PriceFieldSource[] {
@@ -185,33 +303,25 @@ function updateLogisticsResidualDemand(state: PriceLogisticsState) {
 export const priceCellBehavior: PriceCellBehavior = {
   fieldSources: logisticResidualDemandSources,
   afterMarket: updateLogisticsResidualDemand,
-  adaptCell: (cell) => ({
-    localBid: adaptConsumerBid(cell),
-    foodBid: adaptFoodBid(cell),
-    laborBid: adaptLaborBid(cell),
-    laborAsk: adaptLaborAsk(cell),
-    localAsk: adaptProducerAsk(cell),
-    foodAsk: adaptFoodAsk(cell),
-  }),
 };
 
 function localConsumerBid(api: PriceAgentApi, account: Account, resource: PriceMarketResource = "product") {
   const local = api.local(account);
   const consumer = api.consumerAgentForAccount(account);
   if (!local || !consumer) return 0;
-  if (resource === "food") return Math.min(local.foodBid, Math.floor(api.balanceOf(consumer, MONEY_ACCOUNT, "money")));
-  return effectiveProductBidForBalance(local, api.balanceOf(consumer, MONEY_ACCOUNT, "money"));
+  const price = resource === "food" ? adaptFoodBid(local) : adaptConsumerBid(local);
+  return Math.min(price, Math.floor(api.balanceOf(consumer, MONEY_ACCOUNT, "money")));
 }
 
 function productValue(api: PriceAgentApi, account: Account, local: PriceLogisticsCell) {
-  return Math.max(local.localBid, api.diffusedBid(account, "product"));
+  return Math.max(adaptConsumerBid(local), api.diffusedBid(account, "product"));
 }
 
 function outputValue(api: PriceAgentApi, account: Account, local: PriceLogisticsCell, recipe: PriceRecipe) {
   let value = 0;
   for (const [resource, amount] of Object.entries(recipe.outputs) as Array<[PriceResource, number]>) {
     if (resource === "product") value += productValue(api, account, local) * amount;
-    if (resource === "food") value += Math.max(local.foodBid, api.diffusedBid(account, "food")) * amount;
+    if (resource === "food") value += Math.max(adaptFoodBid(local), api.diffusedBid(account, "food")) * amount;
   }
   return value;
 }
@@ -229,8 +339,13 @@ function missingMarketInput(api: PriceAgentApi, account: Account, recipe: PriceR
   return null;
 }
 
-function inputBidLimit(local: PriceLogisticsCell, resource: PriceMarketResource, recipeValue: number) {
-  if (resource === "labor") return Math.min(Math.floor(recipeValue), local.laborBid);
+function inputBidLimit(
+  local: PriceLogisticsCell,
+  resource: PriceMarketResource,
+  recipeValue: number,
+  agent: typeof PRODUCER_AGENT | typeof FARM_PRODUCER_AGENT,
+) {
+  if (resource === "labor") return Math.min(Math.floor(recipeValue), adaptLaborBid(local, agent));
   return Math.floor(recipeValue);
 }
 
@@ -254,7 +369,8 @@ export function createConsumerPolicies(state: PriceLogisticsState): PriceAgentPo
           if (bidQuantity > 0) api.placeBid(account, "product", effectiveBid, bidQuantity);
 
           const labor = api.balance(account, "labor");
-          if (local.laborAsk > 0 && labor > 0) api.placeAsk(account, "labor", local.laborAsk, labor);
+          const laborAsk = adaptLaborAsk(local);
+          if (laborAsk > 0 && labor > 0) api.placeAsk(account, "labor", laborAsk, labor);
         },
       };
     });
@@ -276,7 +392,13 @@ function createProducerPolicy({
   return {
     agent,
     run(api) {
-    const candidates: Array<{ account: Account; resource: PriceMarketResource; bid: number; value: number; quantity: number }> = [];
+      const candidates: Array<{
+        account: Account;
+        resource: PriceMarketResource;
+        bid: number;
+        value: number;
+        quantity: number;
+      }> = [];
       for (const account of api.accounts()) {
         const local = api.local(account);
         if (!local) continue;
@@ -288,36 +410,38 @@ function createProducerPolicy({
           if (!input || !ask) continue;
 
           const recipeValue = outputValue(api, account, local, recipe);
-          const bid = inputBidLimit(local, input, recipeValue);
+          const bid = inputBidLimit(local, input, recipeValue, agent);
           const expectedCost = Math.round((bid + ask.price) / 2);
           const value = recipeValue - expectedCost;
           if (value <= 0 || bid <= 0 || api.balance(MONEY_ACCOUNT, "money") < bid) continue;
-        candidates.push({ account, resource: input, bid, value, quantity: ask.quantity });
+          candidates.push({ account, resource: input, bid, value, quantity: ask.quantity });
         }
       }
 
-    let placed = 0;
-    for (const candidate of candidates.sort((a, b) => b.value - a.value)) {
-      if (placed >= MAX_OPTIONS_PER_TURN) break;
-      const affordable = Math.floor(api.balance(MONEY_ACCOUNT, "money") / candidate.bid);
-      const quantity = Math.min(candidate.quantity, affordable, MAX_OPTIONS_PER_TURN - placed);
-      if (quantity <= 0) continue;
-      api.placeBid(candidate.account, candidate.resource, candidate.bid, quantity);
-      placed += quantity;
-    }
+      let placed = 0;
+      for (const candidate of candidates.sort((a, b) => b.value - a.value)) {
+        if (placed >= MAX_OPTIONS_PER_TURN) break;
+        const affordable = Math.floor(api.balance(MONEY_ACCOUNT, "money") / candidate.bid);
+        const quantity = Math.min(candidate.quantity, affordable, MAX_OPTIONS_PER_TURN - placed);
+        if (quantity <= 0) continue;
+        api.placeBid(candidate.account, candidate.resource, candidate.bid, quantity);
+        placed += quantity;
+      }
 
-    for (const account of api.accounts()) {
-      const local = api.local(account);
-      if (!local) continue;
-      if (sellOutputs.includes("product")) {
-        const stock = api.balance(account, "product");
-        if (stock > 0 && local.localAsk > 0) api.placeAsk(account, "product", local.localAsk, stock);
+      for (const account of api.accounts()) {
+        const local = api.local(account);
+        if (!local) continue;
+        if (sellOutputs.includes("product")) {
+          const stock = api.balance(account, "product");
+          const ask = adaptProducerAsk(local);
+          if (stock > 0 && ask > 0) api.placeAsk(account, "product", ask, stock);
+        }
+        if (sellOutputs.includes("food")) {
+          const food = api.balance(account, "food");
+          const ask = adaptFoodAsk(local);
+          if (food > 0 && ask > 0) api.placeAsk(account, "food", ask, food);
+        }
       }
-      if (sellOutputs.includes("food")) {
-        const food = api.balance(account, "food");
-        if (food > 0 && local.foodAsk > 0) api.placeAsk(account, "food", local.foodAsk, food);
-      }
-    }
     },
   };
 }
@@ -352,17 +476,17 @@ export const logisticsPolicy: PriceAgentPolicy = {
           const held = api.balance(account, resource);
           if (held > 0) {
             const neighbor = api.bestMoveNeighbor(account, resource);
-            const localBid = Math.max(localConsumerBid(api, account, resource), api.bestBid(account, resource)?.price ?? 0);
-            if (neighbor && neighbor.bid > localBid && api.balance(MONEY_ACCOUNT, "money") >= MOVE_COST) {
-              const value = neighbor.bid - localBid;
+            const localConsumerPrice = Math.max(localConsumerBid(api, account, resource), api.bestBid(account, resource)?.price ?? 0);
+            if (neighbor && neighbor.bid > localConsumerPrice && api.balance(MONEY_ACCOUNT, "money") >= MOVE_COST) {
+              const value = neighbor.bid - localConsumerPrice;
               const candidate = { kind: "move" as const, account, to: neighbor.account, value, surplus: value - MOVE_COST };
               if (!best || candidate.surplus > best.surplus) best = candidate;
             }
           }
 
           const ask = api.bestAsk(account, resource);
-          const localAsk = resource === "food" ? local.foodAsk : local.localAsk;
-          if (ask && localAsk > 0) {
+          const localProducerPrice = resource === "food" ? adaptFoodAsk(local) : adaptProducerAsk(local);
+          if (ask && localProducerPrice > 0) {
             const reachableBid = Math.max(localConsumerBid(api, account, resource), api.diffusedBid(account, resource));
             const bid = Math.floor(reachableBid);
             const value = reachableBid - ask.price;

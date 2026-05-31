@@ -8,10 +8,16 @@ import {
   accountOfCell,
   addLedgerBalance,
   refreshCellBalances,
+  type PriceAgent,
   type PriceLedger,
   type PriceLogisticsCell,
   type PriceLogisticsState,
+  type PriceMarketResource,
+  type PriceMarketResourceHistory,
+  type PriceMarketTickHistory,
+  type PriceOrderResult,
 } from "./engine";
+import type { Account } from "../shared/types";
 
 function worldLandSet() {
   return new Set(regionBlocks().map((block) => `${block.x},${block.y}`));
@@ -45,6 +51,99 @@ function factoryAmount(x: number, y: number) {
   return (x * 3 + y) % 17 === 0 ? 1 : 0;
 }
 
+function emptyResourceHistory(): Record<"product" | "food" | "labor", PriceMarketResourceHistory> {
+  return {
+    product: { orders: [], trades: [] },
+    food: { orders: [], trades: [] },
+    labor: { orders: [], trades: [] },
+  };
+}
+
+function seedOrder({
+  id,
+  agent,
+  account,
+  resource,
+  side,
+  price,
+  quantity = 1,
+}: {
+  id: number;
+  agent: PriceAgent;
+  account: Account;
+  resource: PriceMarketResource;
+  side: "bid" | "ask";
+  price: number;
+  quantity?: number;
+}): PriceOrderResult {
+  return { id, agent, account, resource, side, price, quantity, filled: 0, unfilled: 0 };
+}
+
+function initialMarketHistory(cell: { x: number; y: number }, population: number, factory: number, farm: number): PriceMarketTickHistory[] {
+  const account = accountOfCell(cell);
+  const consumer = `Consumer-${cell.x},${cell.y}` as PriceAgent;
+  const resources = emptyResourceHistory();
+  let id = -1;
+  if (population > 0) {
+    resources.product.orders.push(seedOrder({
+      id: id--,
+      agent: consumer,
+      account,
+      resource: "product",
+      side: "bid",
+      price: 8 + Math.min(18, population * 2 + ((cell.x + cell.y) % 5)),
+    }));
+    resources.food.orders.push(seedOrder({
+      id: id--,
+      agent: consumer,
+      account,
+      resource: "food",
+      side: "bid",
+      price: 14 + Math.min(18, population * 2 + ((cell.x * 2 + cell.y) % 5)),
+    }));
+    resources.labor.orders.push(seedOrder({
+      id: id--,
+      agent: consumer,
+      account,
+      resource: "labor",
+      side: "ask",
+      price: 3 + ((cell.x + cell.y * 2) % 6),
+      quantity: Math.max(1, Math.floor(population)),
+    }));
+  }
+  if (factory > 0) {
+    resources.product.orders.push(seedOrder({
+      id: id--,
+      agent: PRODUCER_AGENT,
+      account,
+      resource: "product",
+      side: "ask",
+      price: 4 + ((cell.x * 2 + cell.y) % 7),
+    }));
+  }
+  if (factory > 0 || farm > 0) {
+    resources.labor.orders.push(seedOrder({
+      id: id--,
+      agent: factory > 0 ? PRODUCER_AGENT : FARM_PRODUCER_AGENT,
+      account,
+      resource: "labor",
+      side: "bid",
+      price: 8 + ((cell.x + cell.y) % 5),
+    }));
+  }
+  if (farm > 0) {
+    resources.food.orders.push(seedOrder({
+      id: id--,
+      agent: FARM_PRODUCER_AGENT,
+      account,
+      resource: "food",
+      side: "ask",
+      price: 5 + ((cell.x + cell.y * 3) % 6),
+    }));
+  }
+  return [{ turn: 0, resources }];
+}
+
 export function createPriceLogisticsState(width = TILE_STUDY_COLUMNS, height = TILE_STUDY_ROWS): PriceLogisticsState {
   const ledger: PriceLedger = {};
   const useWorld = width === TILE_STUDY_COLUMNS && height === TILE_STUDY_ROWS;
@@ -59,21 +158,15 @@ export function createPriceLogisticsState(width = TILE_STUDY_COLUMNS, height = T
         x,
         y,
         land,
-        localBid: population > 0 ? 8 + Math.min(18, population * 2 + ((x + y) % 5)) : 0,
-        foodBid: population > 0 ? 14 + Math.min(18, population * 2 + ((x * 2 + y) % 5)) : 0,
         consumerMoney: 0,
         population,
         malnutritionBurden: 0,
         foodConsumed: 0,
-        laborBid: factory || farm ? 8 + ((x + y) % 5) : 0,
-        laborAsk: population > 0 ? 3 + ((x + y * 2) % 6) : 0,
         laborStock: 0,
         fieldBid: 0,
         bidVolume: 0,
         foodFieldBid: 0,
         foodBidVolume: 0,
-        localAsk: factory ? 4 + ((x * 2 + y) % 7) : 0,
-        foodAsk: farm ? 5 + ((x + y * 3) % 6) : 0,
         producerStock: 0,
         producerFoodStock: 0,
         farmProducerFoodStock: 0,
@@ -93,20 +186,22 @@ export function createPriceLogisticsState(width = TILE_STUDY_COLUMNS, height = T
         lastAskUnfilled: factory ? 1 : 0,
         lastFoodAskFilled: 0,
         lastFoodAskUnfilled: farm ? 1 : 0,
+        marketHistory: initialMarketHistory({ x, y }, population, factory, farm),
       };
       if (population > 0) {
+        addLedgerBalance(ledger, `Consumer-${x},${y}`, accountOfCell(cell), "food", population*4);
         addLedgerBalance(ledger, `Consumer-${x},${y}`, accountOfCell(cell), "labor", population);
         addLedgerBalance(ledger, `Consumer-${x},${y}`, MONEY_ACCOUNT, "money", population * (30 + ((x + y) % 20)));
       }
       if (factory) addLedgerBalance(ledger, PRODUCER_AGENT, accountOfCell(cell), "factory", factory);
       if (farm) addLedgerBalance(ledger, FARM_PRODUCER_AGENT, accountOfCell(cell), "farm", farm);
-      if (land && (x + y) % 17 === 0) addLedgerBalance(ledger, LOGISTICS_AGENT, accountOfCell(cell), "product", 2);
+      //if (land && (x + y) % 17 === 0) addLedgerBalance(ledger, LOGISTICS_AGENT, accountOfCell(cell), "product", 2);
       if (land && farm > 0 && (x + y) % 3 === 0) addLedgerBalance(ledger, FARM_PRODUCER_AGENT, accountOfCell(cell), "food", farm);
       return cell;
     }),
   ).flat();
 
-  addLedgerBalance(ledger, LOGISTICS_AGENT, MONEY_ACCOUNT, "money", 180);
+  //addLedgerBalance(ledger, LOGISTICS_AGENT, MONEY_ACCOUNT, "money", 180);
   addLedgerBalance(ledger, PRODUCER_AGENT, MONEY_ACCOUNT, "money", 420);
   addLedgerBalance(ledger, FARM_PRODUCER_AGENT, MONEY_ACCOUNT, "money", 420);
 
@@ -130,13 +225,13 @@ export function createPriceLogisticsState(width = TILE_STUDY_COLUMNS, height = T
         id: "factory-farming",
         inputs: { labor: 1, product: 1 },
         requirements: { farm: 2 },
-        outputs: { food: 3 },
+        outputs: { food: 6 },
       },
       {
         id: "subsistence-food",
         inputs: { labor: 1 },
         requirements: { farm: 1 },
-        outputs: { food: 1 },
+        outputs: { food: 3 },
       },
     ],
     logisticsResources: ["product", "food"],

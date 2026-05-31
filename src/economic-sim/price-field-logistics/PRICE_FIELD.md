@@ -13,8 +13,8 @@ Sources come from logistics' running estimate of residual product demand:
 
 The estimate stores a source price (`fieldBid`) and volume (`bidVolume`) on each
 cell. Both are updated as a running average after auctions clear. A high latent
-`localBid` does not directly become a field source; it first has to show up as
-actual market behavior.
+consumer bid does not directly become a field source; it first has to show up
+as actual market behavior in the local order history.
 
 ## Propagation
 

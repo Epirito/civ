@@ -8,3 +8,9 @@ export {
 } from "./engine";
 export { effectiveProductBid, stepAgentSim as stepPriceLogistics } from "./agents";
 export { createPriceLogisticsState } from "./scenario";
+export {
+  createPriceLogisticsDebugSession,
+  evaluateInSession,
+  type CellDebugSnapshot,
+  type PriceLogisticsDebugSession,
+} from "./debugSession";

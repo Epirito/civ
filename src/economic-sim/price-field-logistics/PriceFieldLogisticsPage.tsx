@@ -13,10 +13,11 @@ import {
   type PriceLogisticsCell,
   type PriceLogisticsEvent,
   type PriceLogisticsState,
+  type PriceMarketResource,
   type PriceResource,
 } from "./engine";
 import type { Account } from "../shared/types";
-import { effectiveProductBid, stepAgentSim} from "./agents";
+import { stepAgentSim } from "./agents";
 import { createPriceLogisticsState } from "./scenario";
 import { fieldCell } from "./priceFieldAutomaton";
 
@@ -61,7 +62,19 @@ function heatColor(t: number, mode: HeatmapMode) {
   return `rgba(${Math.round(28 + t * 208)}, ${Math.round(44 + t * 166)}, ${Math.round(68 + t * 20)}, 0.92)`;
 }
 
-function drawLogistics(canvas: HTMLCanvasElement, state: PriceLogisticsState, heatmap: HeatmapMode) {
+type CellCoord = { x: number; y: number };
+
+function sameCell(a: CellCoord | null, b: CellCoord | null) {
+  return !!a && !!b && a.x === b.x && a.y === b.y;
+}
+
+function drawLogistics(
+  canvas: HTMLCanvasElement,
+  state: PriceLogisticsState,
+  heatmap: HeatmapMode,
+  hover: CellCoord | null,
+  selected: CellCoord | null,
+) {
   const parent = canvas.parentElement;
   if (!parent) return;
   const bounds = parent.getBoundingClientRect();
@@ -103,24 +116,10 @@ function drawLogistics(canvas: HTMLCanvasElement, state: PriceLogisticsState, he
     context.strokeStyle = "rgba(232, 238, 243, 0.08)";
     context.strokeRect(x + 0.5, y + 0.5, cellSize, cellSize);
 
-    if (cell.localBid > 0) {
-      context.fillStyle = "#38bdf8";
-      context.fillRect(x + 3, y + 3, Math.max(4, cellSize * 0.2), Math.max(4, cellSize * 0.2));
-    }
-    if (cell.localAsk > 0) {
-      context.fillStyle = "#f59e0b";
-      context.fillRect(x + cellSize - Math.max(7, cellSize * 0.24), y + 3, Math.max(4, cellSize * 0.2), Math.max(4, cellSize * 0.2));
-    }
     if (cell.population > 0) {
       const burden = Math.max(0, Math.min(1, cell.malnutritionBurden));
       context.fillStyle = burden > 0.4 ? "#ef4444" : "#22c55e";
       context.fillRect(x + 3, y + cellSize - Math.max(7, cellSize * 0.24), Math.max(4, cellSize * 0.2), Math.max(4, cellSize * 0.2));
-    }
-    if (cell.foodAsk > 0) {
-      context.fillStyle = "#a3e635";
-      context.beginPath();
-      context.arc(x + cellSize - Math.max(7, cellSize * 0.22), y + cellSize - Math.max(7, cellSize * 0.22), Math.max(3, cellSize * 0.1), 0, Math.PI * 2);
-      context.fill();
     }
     if (cell.logisticsStock > 0 || cell.movedStock > 0) {
       context.fillStyle = cell.movedStock > 0 ? "#fef08a" : "#ffffff";
@@ -128,7 +127,7 @@ function drawLogistics(canvas: HTMLCanvasElement, state: PriceLogisticsState, he
       context.arc(x + cellSize / 2, y + cellSize / 2, Math.max(3, cellSize * 0.13), 0, Math.PI * 2);
       context.fill();
     }
-    if (cellSize >= 28 && (cell.localBid > 0 || cell.localAsk > 0 || cell.logisticsStock > 0)) {
+    if (cellSize >= 28 && cell.logisticsStock > 0) {
       context.fillStyle = "rgba(255,255,255,0.88)";
       context.font = "10px ui-sans-serif, system-ui";
       context.textAlign = "center";
@@ -137,6 +136,18 @@ function drawLogistics(canvas: HTMLCanvasElement, state: PriceLogisticsState, he
         x + cellSize / 2,
         y + cellSize - 7,
       );
+    }
+
+    if (sameCell(selected, cell)) {
+      context.strokeStyle = "#fef08a";
+      context.lineWidth = 3;
+      context.strokeRect(x + 2.5, y + 2.5, cellSize - 5, cellSize - 5);
+      context.lineWidth = 1;
+    } else if (sameCell(hover, cell)) {
+      context.strokeStyle = "rgba(255,255,255,0.72)";
+      context.lineWidth = 2;
+      context.strokeRect(x + 2, y + 2, cellSize - 4, cellSize - 4);
+      context.lineWidth = 1;
     }
   }
 
@@ -162,17 +173,45 @@ function cellFromPointer(canvas: HTMLCanvasElement, state: PriceLogisticsState, 
   return x >= 0 && y >= 0 && x < state.width && y < state.height ? { x, y } : null;
 }
 
-function CellHoverReadout({ state, cell }: { state: PriceLogisticsState; cell: PriceLogisticsCell | null }) {
+function shortAgent(agent: PriceAgent) {
+  if (agent.startsWith("Consumer-")) return "Consumer";
+  return agent;
+}
+
+function marketLabel(resource: PriceMarketResource) {
+  if (resource === "product") return "Product";
+  if (resource === "food") return "Food";
+  return "Labor";
+}
+
+function CellHoverReadout({
+  state,
+  cell,
+  selected,
+  marketResource,
+  onMarketResourceChange,
+}: {
+  state: PriceLogisticsState;
+  cell: PriceLogisticsCell | null;
+  selected: boolean;
+  marketResource: PriceMarketResource | null;
+  onMarketResourceChange: (resource: PriceMarketResource) => void;
+}) {
   if (!cell) return <strong>{state.width} x {state.height} field logistics</strong>;
   const field = fieldCell(state.bidField, cell.x, cell.y);
-  const bid = effectiveProductBid(cell);
   const account = accountOfCell(cell);
   const consumer = consumerAgentForCell(cell);
   const balance = (agent: PriceAgent, ledgerAccount: Account, resource: PriceResource) =>
     getLedgerBalance(state.ledger, agent, ledgerAccount, resource);
+  const resourceHistory = marketResource
+    ? cell.marketHistory.map((tick) => ({ turn: tick.turn, ...tick.resources[marketResource] }))
+    : [];
   return (
     <>
-      <strong>Cell {cell.x},{cell.y}</strong>
+      <div className="cell-readout-title">
+        <strong>Cell {cell.x},{cell.y}</strong>
+        {selected ? <span>Selected</span> : <span>Hover</span>}
+      </div>
       <div className="cell-hover-summary">
         <span><DollarSign size={13} />{Math.round(cell.consumerMoney)}</span>
         <span><Users size={13} />{cell.population.toFixed(1)}</span>
@@ -181,75 +220,95 @@ function CellHoverReadout({ state, cell }: { state: PriceLogisticsState; cell: P
       <div className="cell-resource-table">
         <div className="cell-resource-header">
           <span>Resource</span>
-          <span>Price</span>
           <span>Consumer</span>
           <span>Producer</span>
           <span>Farm</span>
           <span>Logistics</span>
-          <span>Last</span>
-          <span>Signal</span>
         </div>
         <div className="cell-resource-row">
           <span><Package size={13} />Product</span>
-          <span>bid {bid || "-"} / ask {cell.localAsk || "-"}</span>
           <span>{balance(consumer, account, "product")}</span>
           <span>{balance(PRODUCER_AGENT, account, "product")}</span>
           <span>{balance(FARM_PRODUCER_AGENT, account, "product")}</span>
           <span>{balance(LOGISTICS_AGENT, account, "product")}</span>
-          <span>b {cell.lastBidFilled}/{cell.lastBidUnfilled}; a {cell.lastAskFilled}/{cell.lastAskUnfilled}; m {cell.movedStock}</span>
-          <span>src {cell.fieldBid.toFixed(1)} x {cell.bidVolume.toFixed(1)}; field {field.price.toFixed(1)} x {field.volume.toFixed(1)}</span>
         </div>
         <div className="cell-resource-row">
           <span><Wheat size={13} />Food</span>
-          <span>bid {cell.foodBid || "-"} / ask {cell.foodAsk || "-"}</span>
           <span>{balance(consumer, account, "food")}</span>
           <span>{balance(PRODUCER_AGENT, account, "food")}</span>
           <span>{balance(FARM_PRODUCER_AGENT, account, "food")}</span>
           <span>{balance(LOGISTICS_AGENT, account, "food")}</span>
-          <span>b {cell.lastFoodBidFilled}/{cell.lastFoodBidUnfilled}; a {cell.lastFoodAskFilled}/{cell.lastFoodAskUnfilled}; ate {cell.foodConsumed.toFixed(1)}</span>
-          <span>burden {cell.malnutritionBurden.toFixed(2)}</span>
         </div>
         <div className="cell-resource-row">
           <span><Users size={13} />Labor</span>
-          <span>bid {cell.laborBid || "-"} / ask {cell.laborAsk || "-"}</span>
           <span>{balance(consumer, account, "labor")}</span>
           <span>{balance(PRODUCER_AGENT, account, "labor")}</span>
           <span>{balance(FARM_PRODUCER_AGENT, account, "labor")}</span>
           <span>{balance(LOGISTICS_AGENT, account, "labor")}</span>
-          <span>b {cell.lastLaborBidFilled}/{cell.lastLaborBidUnfilled}; a {cell.lastLaborFilled}/{cell.lastLaborUnfilled}</span>
-          <span>-</span>
         </div>
         <div className="cell-resource-row">
           <span><Factory size={13} />Factory</span>
-          <span>-</span>
           <span>{balance(consumer, account, "factory")}</span>
           <span>{balance(PRODUCER_AGENT, account, "factory")}</span>
           <span>{balance(FARM_PRODUCER_AGENT, account, "factory")}</span>
           <span>{balance(LOGISTICS_AGENT, account, "factory")}</span>
-          <span>-</span>
-          <span>-</span>
         </div>
         <div className="cell-resource-row">
           <span><Wheat size={13} />Farm</span>
-          <span>-</span>
           <span>{balance(consumer, account, "farm")}</span>
           <span>{balance(PRODUCER_AGENT, account, "farm")}</span>
           <span>{balance(FARM_PRODUCER_AGENT, account, "farm")}</span>
           <span>{balance(LOGISTICS_AGENT, account, "farm")}</span>
-          <span>-</span>
-          <span>-</span>
         </div>
         <div className="cell-resource-row">
           <span><DollarSign size={13} />Money</span>
-          <span>-</span>
           <span>{Math.round(balance(consumer, MONEY_ACCOUNT, "money"))}</span>
           <span>{Math.round(balance(PRODUCER_AGENT, MONEY_ACCOUNT, "money"))}</span>
           <span>{Math.round(balance(FARM_PRODUCER_AGENT, MONEY_ACCOUNT, "money"))}</span>
           <span>{Math.round(balance(LOGISTICS_AGENT, MONEY_ACCOUNT, "money"))}</span>
-          <span>-</span>
-          <span>-</span>
         </div>
       </div>
+      <div className="cell-market-tabs" aria-label="Market history resource">
+        {(["product", "food", "labor"] as PriceMarketResource[]).map((resource) => (
+          <button
+            key={resource}
+            className={marketResource === resource ? "active" : ""}
+            onClick={() => onMarketResourceChange(resource)}
+          >
+            {marketLabel(resource)}
+          </button>
+        ))}
+      </div>
+      {marketResource ? (
+        <div className="cell-market-history">
+          <div className="cell-market-history-header">
+            <span>Tick</span>
+            <span>Orders</span>
+            <span>Trades</span>
+          </div>
+          {resourceHistory.length > 0 ? resourceHistory.map((tick) => (
+            <div className="cell-market-history-row" key={`${cell.x},${cell.y}-${tick.turn}-${marketResource}`}>
+              <span>{tick.turn}</span>
+              <span>
+                {tick.orders.length > 0
+                  ? tick.orders.map((order) =>
+                    `${order.side} ${shortAgent(order.agent)} ${order.filled}/${order.quantity} @ ${order.price}${order.unfilled ? ` (${order.unfilled} open)` : ""}`,
+                  ).join("; ")
+                  : "-"}
+              </span>
+              <span>
+                {tick.trades.length > 0
+                  ? tick.trades.map((trade) =>
+                    `${shortAgent(trade.buyer)} <- ${shortAgent(trade.seller)} ${trade.quantity} @ ${trade.price}`,
+                  ).join("; ")
+                  : "-"}
+              </span>
+            </div>
+          )) : (
+            <div className="cell-market-history-empty">No recorded market ticks yet.</div>
+          )}
+        </div>
+      ) : null}
       <span className="cell-channel-line">
         Channels {field.channels.map((channel) => `${channel.sourceId}:${channel.price.toFixed(1)}`).join(", ") || "-"}
       </span>
@@ -263,7 +322,10 @@ export function PriceFieldLogisticsPage() {
   const [running, setRunning] = useState(true);
   const [fast, setFast] = useState(false);
   const [heatmap, setHeatmap] = useState<HeatmapMode>("price:product");
-  const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
+  const [hover, setHover] = useState<CellCoord | null>(null);
+  const [selected, setSelected] = useState<CellCoord | null>(null);
+  const [marketResource, setMarketResource] = useState<PriceMarketResource | null>(null);
+  const [hoverReadoutTop, setHoverReadoutTop] = useState(false);
   const stateRef = useRef(state);
   const steppingRef = useRef(false);
 
@@ -284,7 +346,8 @@ export function PriceFieldLogisticsPage() {
     }),
     [state],
   );
-  const hoveredCell = hover ? logisticsCell(state, hover.x, hover.y) : null;
+  const activeCellCoord = selected ?? hover;
+  const activeCell = activeCellCoord ? logisticsCell(state, activeCellCoord.x, activeCellCoord.y) : null;
 
   useEffect(() => {
     stateRef.current = state;
@@ -293,11 +356,11 @@ export function PriceFieldLogisticsPage() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
-    drawLogistics(canvas, state, heatmap);
-    const onResize = () => drawLogistics(canvas, state, heatmap);
+    drawLogistics(canvas, state, heatmap, hover, selected);
+    const onResize = () => drawLogistics(canvas, state, heatmap, hover, selected);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [heatmap, state]);
+  }, [heatmap, hover, selected, state]);
 
   useEffect(() => {
   if (!running) return undefined;
@@ -456,16 +519,31 @@ export function PriceFieldLogisticsPage() {
           onPointerDown={(event) => {
             const canvas = canvasRef.current;
             if (!canvas) return;
-            setHover(cellFromPointer(canvas, state, event.clientX, event.clientY));
+            const cell = cellFromPointer(canvas, state, event.clientX, event.clientY);
+            setSelected((current) => sameCell(current, cell) ? null : cell);
+            setHover(cell);
+            setHoverReadoutTop(event.clientY > window.innerHeight / 2);
           }}
           onPointerMove={(event) => {
             const canvas = canvasRef.current;
-            if (canvas) setHover(cellFromPointer(canvas, state, event.clientX, event.clientY));
+            if (canvas) {
+              setHover(cellFromPointer(canvas, state, event.clientX, event.clientY));
+              setHoverReadoutTop(event.clientY > window.innerHeight / 2);
+            }
           }}
-          onPointerLeave={() => setHover(null)}
+          onPointerLeave={() => {
+            setHover(null);
+            setHoverReadoutTop(false);
+          }}
         />
-        <div className="readout sim-readout">
-          <CellHoverReadout state={state} cell={hoveredCell} />
+        <div className={`readout sim-readout ${!selected && hoverReadoutTop ? "top" : ""}`}>
+          <CellHoverReadout
+            state={state}
+            cell={activeCell}
+            selected={!!selected}
+            marketResource={marketResource}
+            onMarketResourceChange={setMarketResource}
+          />
         </div>
       </section>
     </main>

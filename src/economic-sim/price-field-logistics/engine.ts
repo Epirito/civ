@@ -16,21 +16,15 @@ export type PriceLogisticsCell = {
   x: number;
   y: number;
   land: boolean;
-  localBid: number;
-  foodBid: number;
   consumerMoney: number;
   population: number;
   malnutritionBurden: number;
   foodConsumed: number;
-  laborBid: number;
-  laborAsk: number;
   laborStock: number;
   fieldBid: number;
   bidVolume: number;
   foodFieldBid: number;
   foodBidVolume: number;
-  localAsk: number;
-  foodAsk: number;
   producerStock: number;
   producerFoodStock: number;
   farmProducerFoodStock: number;
@@ -50,6 +44,7 @@ export type PriceLogisticsCell = {
   lastAskUnfilled: number;
   lastFoodAskFilled: number;
   lastFoodAskUnfilled: number;
+  marketHistory: PriceMarketTickHistory[];
 };
 
 export type PriceLogisticsEvent =
@@ -83,6 +78,16 @@ export type PriceTrade = {
   seller: PriceAgent;
   quantity: number;
   price: number;
+};
+
+export type PriceMarketResourceHistory = {
+  orders: PriceOrderResult[];
+  trades: PriceTrade[];
+};
+
+export type PriceMarketTickHistory = {
+  turn: number;
+  resources: Record<PriceMarketResource, PriceMarketResourceHistory>;
 };
 
 export type PriceLedger = Partial<Record<PriceAgent, Partial<Record<Account, Partial<Record<PriceResource, number>>>>>>;
@@ -158,7 +163,6 @@ export type PriceStepProfiler = {
 export type PriceCellBehavior = {
   fieldSources: (state: PriceLogisticsState, resource: PriceLogisticsResource) => PriceFieldSource[];
   afterMarket: (state: PriceLogisticsState) => void;
-  adaptCell: (cell: PriceLogisticsCell) => Partial<Pick<PriceLogisticsCell, "localBid" | "foodBid" | "laborBid" | "laborAsk" | "localAsk" | "foodAsk">>;
 };
 
 export const MOVE_COST = 1;
@@ -435,6 +439,50 @@ function clearLocalAuctions(state: PriceLogisticsState, resources: PriceMarketRe
   state.orders = [];
 }
 
+function emptyMarketResourceHistory(): Record<PriceMarketResource, PriceMarketResourceHistory> {
+  return {
+    product: { orders: [], trades: [] },
+    food: { orders: [], trades: [] },
+    labor: { orders: [], trades: [] },
+  };
+}
+
+function cloneMarketHistory(history: PriceMarketTickHistory[]): PriceMarketTickHistory[] {
+  return history.map((tick) => ({
+    turn: tick.turn,
+    resources: {
+      product: { orders: [...tick.resources.product.orders], trades: [...tick.resources.product.trades] },
+      food: { orders: [...tick.resources.food.orders], trades: [...tick.resources.food.trades] },
+      labor: { orders: [...tick.resources.labor.orders], trades: [...tick.resources.labor.trades] },
+    },
+  }));
+}
+
+function recordCellMarketHistory(state: PriceLogisticsState) {
+  const entriesByAccount = new Map<Account, Record<PriceMarketResource, PriceMarketResourceHistory>>();
+  const ensureEntry = (account: Account) => {
+    const entry = entriesByAccount.get(account) ?? emptyMarketResourceHistory();
+    entriesByAccount.set(account, entry);
+    return entry;
+  };
+
+  for (const result of state.lastOrderResults) {
+    if (!parseAccount(result.account)) continue;
+    ensureEntry(result.account)[result.resource].orders.push(result);
+  }
+
+  for (const trade of state.trades) {
+    ensureEntry(trade.account)[trade.resource].trades.push(trade);
+  }
+
+  for (const cell of state.cells) {
+    const resources = entriesByAccount.get(accountOfCell(cell)) ?? emptyMarketResourceHistory();
+    const seed = cell.marketHistory.find((tick) => tick.turn === 0);
+    const recent = [{ turn: state.turn, resources }, ...cell.marketHistory.filter((tick) => tick.turn !== 0)].slice(0, 5);
+    cell.marketHistory = seed ? [...recent, seed] : recent;
+  }
+}
+
 function syncTradeEffects(state: PriceLogisticsState) {
   for (const cell of state.cells) {
     cell.lastBidFilled = 0;
@@ -568,10 +616,8 @@ function updateFoodAndPopulation(state: PriceLogisticsState) {
     if (consumed > 0) addLedgerBalance(state.ledger, consumer, account, "food", -consumed);
 
     const adequacy = consumed / requiredFood;
-    const deficit = Math.max(0, 1 - adequacy);
-    const surplus = Math.max(0, adequacy - 1);
     cell.foodConsumed = consumed;
-    cell.malnutritionBurden = clamp(cell.malnutritionBurden + deficit * (7 / 90) - surplus * 0.14, 0, 1);
+    cell.malnutritionBurden = clamp(cell.malnutritionBurden + (1-adequacy) * (7 / 180) , 0, 1);
 
     const mortality = NORMAL_MORTALITY_PER_WEEK + 0.19 * cell.malnutritionBurden ** 4;
     const fertility = BASE_FERTILITY_PER_WEEK * (1 - cell.malnutritionBurden) ** 2;
@@ -685,7 +731,7 @@ export function stepSimEngine(
     turn: state.turn + 1,
     nextOrderId: state.nextOrderId,
     ledger: cloneLedger(state.ledger),
-    cells: state.cells.map((cell) => ({ ...cell })),
+    cells: state.cells.map((cell) => ({ ...cell, marketHistory: cloneMarketHistory(cell.marketHistory) })),
     orders: [],
     lastOrderResults: [],
     trades: [],
@@ -707,7 +753,6 @@ export function stepSimEngine(
       setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "farm", cell.farmStock);
       setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "product", cell.logisticsStock);
       setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "food", cell.logisticsFoodStock);
-      Object.assign(cell, behavior.adaptCell(cell));
       const labor = getLedgerBalance(next.ledger, consumer, account, "labor");
       const generatedLabor = Math.floor(cell.population * laborProductivity(cell));
       setLedgerBalance(next.ledger, consumer, account, "labor", Math.min(12, labor + generatedLabor));
@@ -742,6 +787,7 @@ export function stepSimEngine(
   });
 
   profile(profiler, "clearLocalAuctions", () => clearLocalAuctions(next, ["labor", "product", "food"]));
+  profile(profiler, "recordCellMarketHistory", () => recordCellMarketHistory(next));
   profile(profiler, "syncTradeEffects", () => syncTradeEffects(next));
   profile(profiler, "generateProducts", () => generateProducts(next));
   profile(profiler, "foodAndPopulation", () => updateFoodAndPopulation(next));
@@ -762,7 +808,7 @@ export async function stepSimAsync(
     turn: state.turn + 1,
     nextOrderId: state.nextOrderId,
     ledger: cloneLedger(state.ledger),
-    cells: state.cells.map((cell) => ({ ...cell })),
+    cells: state.cells.map((cell) => ({ ...cell, marketHistory: cloneMarketHistory(cell.marketHistory) })),
     orders: [],
     lastOrderResults: [],
     trades: [],
@@ -784,7 +830,6 @@ export async function stepSimAsync(
       setLedgerBalance(next.ledger, FARM_PRODUCER_AGENT, account, "farm", cell.farmStock);
       setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "product", cell.logisticsStock);
       setLedgerBalance(next.ledger, LOGISTICS_AGENT, account, "food", cell.logisticsFoodStock);
-      Object.assign(cell, behavior.adaptCell(cell));
       const labor = getLedgerBalance(next.ledger, consumer, account, "labor");
       const generatedLabor = Math.floor(cell.population * laborProductivity(cell));
       setLedgerBalance(next.ledger, consumer, account, "labor", Math.min(12, labor + generatedLabor));
@@ -819,6 +864,7 @@ export async function stepSimAsync(
   });
 
   profile(profiler, "clearLocalAuctions", () => clearLocalAuctions(next, ["labor", "product", "food"]));
+  profile(profiler, "recordCellMarketHistory", () => recordCellMarketHistory(next));
   profile(profiler, "syncTradeEffects", () => syncTradeEffects(next));
   profile(profiler, "generateProducts", () => generateProducts(next));
   profile(profiler, "foodAndPopulation", () => updateFoodAndPopulation(next));
@@ -866,21 +912,15 @@ export function runAuction({
       x: 0,
       y: 0,
       land: true,
-      localBid: 0,
-      foodBid: 0,
       consumerMoney: 0,
       population: 0,
       malnutritionBurden: 0,
       foodConsumed: 0,
-      laborBid: 0,
-      laborAsk: 0,
       laborStock: 0,
       fieldBid: 0,
       bidVolume: 0,
       foodFieldBid: 0,
       foodBidVolume: 0,
-      localAsk: 0,
-      foodAsk: 0,
       producerStock: 0,
       producerFoodStock: 0,
       farmProducerFoodStock: 0,
@@ -900,6 +940,7 @@ export function runAuction({
       lastAskUnfilled: 0,
       lastFoodAskFilled: 0,
       lastFoodAskUnfilled: 0,
+      marketHistory: [],
     }],
     bidField: { width: 1, height: 1, turn: 0, cells: [] },
     bidFields: { product: { width: 1, height: 1, turn: 0, cells: [] }, food: { width: 1, height: 1, turn: 0, cells: [] } },

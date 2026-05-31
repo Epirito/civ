@@ -65,10 +65,6 @@ Orders clear independently by `(account, resource)`.
 `lastOrderResults` records filled and unfilled quantity for every order from the
 last clearing pass.
 
-The cell also tracks separate local labor bid and ask history. Producer labor
-bid fills/misses update `lastLaborBidFilled` and `lastLaborBidUnfilled`; consumer
-labor ask fills/misses update `lastLaborFilled` and `lastLaborUnfilled`.
-
 ## Derived Cell Mirrors
 
 The engine refreshes these cell fields from the ledger:

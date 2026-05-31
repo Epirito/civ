@@ -9,6 +9,7 @@
     "test": "vitest run",
     "benchmark:economic-sim": "vitest run --testTimeout 120000 src/economic-sim/logistics-at-a-distance/headlessBenchmark.test.ts",
     "benchmark:price-logistics": "vitest run --testTimeout 120000 src/economic-sim/price-field-logistics/headlessBenchmark.test.ts",
+    "sim:price-logistics": "node --import tsx scripts/price-logistics-repl.ts",
     "preview": "vite preview --host 0.0.0.0",
     "download:data": "node scripts/download-data.mjs"
   },
@@ -29,6 +30,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.184.1",
+    "tsx": "^4.22.3",
     "vitest": "^4.1.6"
   }
 }

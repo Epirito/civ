@@ -634,10 +634,15 @@ canvas {
   backdrop-filter: blur(10px);
 }
 
+.readout.top {
+  top: 18px;
+  bottom: auto;
+}
+
 .sim-readout {
   display: grid;
   gap: 4px;
-  max-width: 560px;
+  max-width: min(920px, calc(100vw - 64px));
 }
 
 .sim-readout strong {
@@ -646,6 +651,21 @@ canvas {
 
 .sim-readout span {
   color: #c6d6dc;
+}
+
+.cell-readout-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cell-readout-title span {
+  color: #fef08a;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .cell-hover-summary {
@@ -671,7 +691,7 @@ canvas {
 .cell-resource-header,
 .cell-resource-row {
   display: grid;
-  grid-template-columns: minmax(68px, 0.8fr) minmax(82px, 1fr) repeat(4, minmax(64px, 0.75fr)) minmax(84px, 1fr) minmax(58px, 0.7fr);
+  grid-template-columns: minmax(74px, 0.8fr) repeat(4, minmax(70px, 0.75fr));
   gap: 8px;
   align-items: center;
 }
@@ -699,6 +719,68 @@ canvas {
 .cell-resource-row span:not(:first-child),
 .cell-resource-header span:not(:first-child) {
   text-align: right;
+}
+
+.cell-market-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.cell-market-tabs button {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(232, 238, 243, 0.18);
+  border-radius: 7px;
+  background: rgba(232, 238, 243, 0.07);
+  color: #d8e8ee;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cell-market-tabs button:hover,
+.cell-market-tabs button.active {
+  border-color: rgba(56, 189, 248, 0.7);
+  background: rgba(56, 189, 248, 0.16);
+  color: #ffffff;
+}
+
+.cell-market-history {
+  display: grid;
+  gap: 2px;
+  padding-top: 2px;
+  font-size: 12px;
+}
+
+.cell-market-history-header,
+.cell-market-history-row {
+  display: grid;
+  grid-template-columns: 48px minmax(220px, 1.1fr) minmax(180px, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.cell-market-history-header {
+  color: #8fb8c9;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.cell-market-history-row {
+  min-height: 24px;
+  border-top: 1px solid rgba(232, 238, 243, 0.09);
+  padding-top: 3px;
+}
+
+.cell-market-history-row span,
+.cell-market-history-header span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cell-market-history-empty {
+  color: #8fb8c9;
 }
 
 @media (max-width: 840px) {
